@@ -1,0 +1,30 @@
+import React, { useState, useEffect } from 'react';
+import { useDebounced } from './useDebounced';
+
+type Props = {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+};
+
+export function SearchInput({ value, onChange, placeholder = 'Search domains...' }: Props) {
+  const [local, setLocal] = useState(value);
+  const debounced = useDebounced(local, 300);
+
+  useEffect(() => {
+    onChange(debounced);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debounced]);
+
+  useEffect(() => setLocal(value), [value]);
+
+  return (
+    <input
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      placeholder={placeholder}
+      className="px-3 py-2 border rounded w-full md:w-72 focus:outline-none focus:ring"
+      aria-label="Search domains"
+    />
+  );
+}
