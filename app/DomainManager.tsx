@@ -16,7 +16,7 @@ import { normalizeDomain } from "@/lib/domain/domainUtils";
 import { applyFilters } from "@/lib/domain/domainUtils";
 
 // React
-import { useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
 import { SelectInstance } from "react-select";
 
 
@@ -119,6 +119,12 @@ export default function DomainManager() {
 
   const rowsPerPage = 10;
 
+  useEffect(() => {
+    fetch("/api/domains")
+      .then(res => res.json())
+      .then(data => setDomains(data));
+  }, []);
+
 
   // ================================
   // Derived Data
@@ -183,7 +189,7 @@ export default function DomainManager() {
   // Domain CRUD
   // ================================
 
-  const handleAddDomain = () => {
+  const handleAddDomain = async () => {
 
     if (!domain || !hosting || !project || !account) {
       alert("Domain, Hosting, Account, and Project are required");
@@ -212,7 +218,17 @@ export default function DomainManager() {
       status: "available",
     };
 
-    setDomains(prev => [...prev, newDomain]);
+    await fetch("/api/domains", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(newDomain),
+    });
+
+    const res = await fetch("/api/domains");
+    const data = await res.json();
+    setDomains(data);
 
     setDomain("");
     setHosting("");

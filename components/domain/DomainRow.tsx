@@ -139,7 +139,9 @@ export default function DomainRow(props: Props) {
             }
           />
         ) : (
-          item.expiry || "-"
+          item.expiry
+            ? new Date(item.expiry).toISOString().split("T")[0]
+            : "-"
         )}
       </td>
 

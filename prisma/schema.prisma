@@ -1,0 +1,28 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum DomainStatus {
+  available
+  taken
+}
+
+model Domain {
+  id             String   @id @default(cuid())
+  domain         String   @unique
+  hosting        String
+  account        String
+  project        String
+  country        String
+  expiry         DateTime
+  status         DomainStatus
+  usedAt         DateTime?
+  usedForProject String?
+  usedForCountry String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
