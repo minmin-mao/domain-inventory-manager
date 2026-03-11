@@ -1,5 +1,5 @@
 import { useReducer, useMemo, useCallback } from 'react';
-import { DomainFilters, ExpiryFilterOption, DomainRecord } from './domainTypes';
+import { DomainFilters, ExpiryFilterOption, DomainItem } from './domainTypes';
 import { applyFilters } from './domainUtils';
 
 type Action =
@@ -37,7 +37,7 @@ function reducer(state: DomainFilters, action: Action): DomainFilters {
   }
 }
 
-export function useFilters(domains: DomainRecord[]) {
+export function useFilters(domains: DomainItem[]) {
   const [filters, dispatch] = useReducer(reducer, defaultFilters);
 
   const setSearch = useCallback((v: string) => dispatch({ type: 'setSearch', payload: v }), []);

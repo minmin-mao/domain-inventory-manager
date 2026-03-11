@@ -1,4 +1,4 @@
-import { DomainRecord, DomainFilters, DomainItem } from './domainTypes';
+import { DomainFilters, DomainItem } from './domainTypes';
 
 export const normalizeDomain = (d: string) => {
   return d

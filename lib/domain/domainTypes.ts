@@ -22,18 +22,6 @@ export type DomainItem = {
   }
 }
 
-export type DomainRecord = {
-
-  id: string;
-  name: string; 
-  expiryDate?: string | null;
-  hostingProvider?: string | null;
-  project?: string | null;
-  country?: string | null;
-  account?: string | null;
-  status?: 'taken' | 'available';
-};
-
 export type ExpiryFilterOption = 'all' | 'expired' | 'le30' | 'le60' ;
 
 export type DomainFilters = {
