@@ -240,8 +240,7 @@ export default function DomainManager() {
   };
 
 
-  const handleDeleteDomain = (id: string) => {
-
+  const handleDeleteDomain = async (id: string) => {
     const target = domains.find(d => d.id === id);
     if (!target) return;
 
@@ -253,7 +252,13 @@ export default function DomainManager() {
     const ok = confirm(`Delete domain "${target.domain}" ?`);
     if (!ok) return;
 
-    setDomains(prev => prev.filter(d => d.id !== id));
+    await fetch(`/api/domains?id=${id}`, {
+      method: "DELETE"
+    });
+
+    const res = await fetch("/api/domains");
+    const data = await res.json();
+    setDomains(data);
   };
 
   const handleGoToDuplicate = () => {
@@ -371,23 +376,27 @@ export default function DomainManager() {
     setEditDomain(domain);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
 
     if (!editDomain) return;
 
-    setDomains(prev =>
-      prev.map(d =>
-        d.id === editDomain.id
-          ? { ...editDomain }
-          : d
-      )
-    );
+    await fetch(`/api/domains`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(editDomain),
+    });
 
     setEditingId(null);
     setEditDomain(null);
+
+    const res = await fetch("/api/domains");
+    const data = await res.json();
+    setDomains(data);
   };
-
-
+  
+  
   // ================================
   // Render
   // ================================
@@ -456,6 +465,21 @@ export default function DomainManager() {
           />
 
         </div>
+
+        {duplicateDomain && (
+          <div className="mt-4 rounded-lg border border-red-800 bg-red-950/40 p-4 flex items-center justify-between">
+            <div className="text-sm text-red-300">
+              ⚠ Domain <b>{duplicateDomain.domain}</b> already exists in inventory.
+            </div>
+
+            <Button
+              variant="secondary"
+              onClick={handleGoToDuplicate}
+            >
+              Go to existing
+            </Button>
+          </div>
+        )}
 
         <div className="mt-6 flex justify-end">
           <Button onClick={handleAddDomain}>

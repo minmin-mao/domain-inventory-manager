@@ -28,3 +28,39 @@ export async function POST(req: Request) {
 
   return NextResponse.json(domain);
 }
+
+// UPDATE domain
+export async function PUT(req: Request) {
+  const body = await req.json();
+
+  const updated = await prisma.domain.update({
+    where: { id: body.id },
+    data: {
+      domain: body.domain,
+      hosting: body.hosting,
+      account: body.account,
+      project: body.project,
+      country: body.country,
+      expiry: new Date(body.expiry),
+      status: body.status,
+    },
+  });
+
+  return NextResponse.json(updated);
+}
+
+// DELETE domain
+export async function DELETE(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const id = searchParams.get("id");
+
+  if (!id) {
+    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+  }
+
+  await prisma.domain.delete({
+    where: { id },
+  });
+
+  return NextResponse.json({ success: true });
+}

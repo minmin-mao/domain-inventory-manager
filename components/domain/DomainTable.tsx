@@ -59,7 +59,7 @@ export default function DomainTable(props: Props) {
   return (
     <Card title="3. Domain sheet">
       {/* Duplicate warning */}
-      {duplicateDomain && (
+      {/* {duplicateDomain && (
         <div className="mb-4 flex items-center justify-between rounded-lg p-3 text-sm text-yellow-400">
           <span>
             ⚠ Domain {duplicateDomain.domain} already exists in inventory.
@@ -69,7 +69,7 @@ export default function DomainTable(props: Props) {
             Go to existing
           </Button>
         </div>
-      )}
+      )} */}
 
       <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
         <table className="w-full text-sm">
