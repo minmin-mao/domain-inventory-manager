@@ -1,4 +1,13 @@
 import "./global.css";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  icons: {
+    icon: "/globe.svg",
+    shortcut: "/globe.svg",
+    apple: "/globe.svg",
+  },
+};
 
 export default function RootLayout({
   children,

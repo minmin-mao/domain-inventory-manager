@@ -7,7 +7,7 @@ export default function Button({
   ...props
 }: Props) {
   const base =
-    "inline-flex items-center rounded-lg px-4 py-2.5 text-sm font-medium transition";
+    "inline-flex cursor-pointer items-center rounded-lg px-4 py-2.5 text-sm font-medium transition disabled:cursor-not-allowed";
 
   const variants = {
     primary:

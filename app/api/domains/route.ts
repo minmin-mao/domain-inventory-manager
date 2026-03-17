@@ -1,8 +1,10 @@
 import { prisma } from "@/lib/prisma";
+import { normalizeDomain } from "@/lib/domain/domainUtils";
+import { capitalizeText } from "@/lib/domain/textUtils";
 import { NextResponse } from "next/server";
 
-const uppercaseText = (value: unknown) =>
-  typeof value === "string" ? value.trim().toUpperCase() : "";
+const normalizeText = (value: unknown) =>
+  typeof value === "string" ? capitalizeText(value.trim()) : "";
 
 const parseExpiry = (value: unknown) => {
   if (typeof value !== "string" || !value.trim()) return null;
@@ -34,11 +36,11 @@ export async function POST(req: Request) {
 
     const domain = await prisma.domain.create({
       data: {
-        domain: body.domain,
-        hosting: uppercaseText(body.hosting),
-        account: uppercaseText(body.account),
-        project: uppercaseText(body.project),
-        country: uppercaseText(body.country),
+        domain: normalizeDomain(body.domain),
+        hosting: normalizeText(body.hosting),
+        account: normalizeText(body.account),
+        project: normalizeText(body.project),
+        country: normalizeText(body.country),
         ...(expiry ? { expiry } : {}),
         status: "available",
       },
@@ -68,11 +70,11 @@ export async function PUT(req: Request) {
     const updated = await prisma.domain.update({
       where: { id: body.id },
       data: {
-        domain: body.domain,
-        hosting: uppercaseText(body.hosting),
-        account: uppercaseText(body.account),
-        project: uppercaseText(body.project),
-        country: uppercaseText(body.country),
+        domain: normalizeDomain(body.domain),
+        hosting: normalizeText(body.hosting),
+        account: normalizeText(body.account),
+        project: normalizeText(body.project),
+        country: normalizeText(body.country),
         ...(expiry ? { expiry } : { expiry: null }),
         status: body.status,
       },

@@ -14,6 +14,7 @@ import { FilterBar } from "@/components/filters/FilterBar";
 // Utilities
 import { normalizeDomain } from "@/lib/domain/domainUtils";
 import { applyFilters } from "@/lib/domain/domainUtils";
+import { capitalizeText } from "@/lib/domain/textUtils";
 import type {
   DomainFilters,
   DomainHistoryItem,
@@ -39,7 +40,6 @@ type Option = {
 // ================================
 
 export default function DomainManager() {
-  const toUpperText = (value: string) => value.toUpperCase();
   const normalizeExpiryInput = (value: string) => {
     const trimmed = value.trim();
     const localDateMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -107,26 +107,14 @@ export default function DomainManager() {
   const [pageAvailable, setPageAvailable] = useState(1);
   const [pageHistory, setPageHistory] = useState(1);
   const [historyActionId, setHistoryActionId] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const rowsPerPage = 10;
 
   const loadInventoryData = async () => {
-    const [domainsRes, historyRes] = await Promise.all([
-      fetch("/api/domains"),
-      fetch("/api/domain-history"),
-    ]);
+    setIsLoading(true);
 
-    const domainsData = domainsRes.ok ? await domainsRes.json() : [];
-    const historyData = historyRes.ok ? await historyRes.json() : [];
-
-    setDomains(domainsData);
-    setHistory(historyData);
-  };
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const load = async () => {
+    try {
       const [domainsRes, historyRes] = await Promise.all([
         fetch("/api/domains"),
         fetch("/api/domain-history"),
@@ -135,17 +123,22 @@ export default function DomainManager() {
       const domainsData = domainsRes.ok ? await domainsRes.json() : [];
       const historyData = historyRes.ok ? await historyRes.json() : [];
 
-      if (cancelled) return;
-
       setDomains(domainsData);
       setHistory(historyData);
-    };
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
-    void load().catch((error) => {
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadInventoryData().catch((error) => {
       console.error("Failed to load inventory data", error);
       if (cancelled) return;
       setDomains([]);
       setHistory([]);
+      setIsLoading(false);
     });
 
     return () => {
@@ -253,7 +246,7 @@ export default function DomainManager() {
       expiry: resolvedExpiry || null,
       account,
       project,
-      country: (country.trim().toUpperCase() || "-"),
+      country: (capitalizeText(country.trim()) || "-"),
       status: "available",
     };
 
@@ -325,7 +318,7 @@ export default function DomainManager() {
 
   const handleUseDomain = async (id: string) => {
     const projectValue = searchProject.trim();
-    const requestCountry = searchCountry.trim().toUpperCase();
+    const requestCountry = capitalizeText(searchCountry.trim());
 
     if (!projectValue) {
       setRequestError("Project name is required.");
@@ -530,7 +523,7 @@ export default function DomainManager() {
           <SmartDropdown
             ref={hostingRef}
             value={hosting}
-            setValue={(value) => setHosting(toUpperText(value))}
+            setValue={(value) => setHosting(capitalizeText(value))}
             options={hostingOptions}
             setOptions={setHostingOptions}
             placeholder="Hosting provider"
@@ -546,7 +539,7 @@ export default function DomainManager() {
 
           <SmartDropdown
             value={account}
-            setValue={(value) => setAccount(toUpperText(value))}
+            setValue={(value) => setAccount(capitalizeText(value))}
             options={accountOptions}
             setOptions={setAccountOptions}
             placeholder="Account"
@@ -554,7 +547,7 @@ export default function DomainManager() {
 
           <SmartDropdown
             value={project}
-            setValue={(value) => setProject(toUpperText(value))}
+            setValue={(value) => setProject(capitalizeText(value))}
             options={projectOptions}
             setOptions={setProjectOptions}
             placeholder="Project Name"
@@ -562,7 +555,7 @@ export default function DomainManager() {
 
           <SmartDropdown
             value={country}
-            setValue={(value) => setCountry(toUpperText(value))}
+            setValue={(value) => setCountry(capitalizeText(value))}
             options={countryOptions}
             setOptions={setCountryOptions}
             placeholder="Country"
@@ -586,8 +579,8 @@ export default function DomainManager() {
         )}
 
         <div className="mt-6 flex justify-end">
-          <Button onClick={handleAddDomain}>
-            Add domain
+          <Button onClick={handleAddDomain} disabled={isLoading}>
+            {isLoading ? "Loading..." : "Add domain"}
           </Button>
         </div>
       </Card>
@@ -601,7 +594,7 @@ export default function DomainManager() {
           placeholder="Project Name"
           value={searchProject}
           onChange={(e) => {
-            setSearchProject(toUpperText(e.target.value));
+            setSearchProject(capitalizeText(e.target.value));
             if (requestError) setRequestError("");
           }}
         />
@@ -610,7 +603,7 @@ export default function DomainManager() {
           placeholder="Country"
           value={searchCountry}
           onChange={(e) => {
-            setSearchCountry(toUpperText(e.target.value));
+            setSearchCountry(capitalizeText(e.target.value));
             if (requestError) setRequestError("");
           }}
           required
@@ -628,8 +621,9 @@ export default function DomainManager() {
         <Button
           variant="secondary"
           onClick={handleSuggestDomain}
+          disabled={isLoading}
         >
-          Suggest domain
+          {isLoading ? "Loading..." : "Suggest domain"}
         </Button>
       </div>
 
@@ -713,14 +707,19 @@ export default function DomainManager() {
         totalPages={totalPagesAvailable}
         totalItems={filteredAvailable.length}
         rowsPerPage={rowsPerPage}
+        isLoading={isLoading}
         onPrev={() => setPageAvailable(p => Math.max(p - 1, 1))}
         onNext={() => setPageAvailable(p => Math.min(p + 1, totalPagesAvailable))}
         editingId={editingId}
         editDomain={editDomain}
         highlightDomainId={highlightDomainId}
         duplicateDomain={duplicateDomain}
+        hostingOptions={hostingOptions}
+        accountOptions={accountOptions}
         projectOptions={projectOptions}
         countryOptions={countryOptions}
+        setHostingOptions={setHostingOptions}
+        setAccountOptions={setAccountOptions}
         setProjectOptions={setProjectOptions}
         setCountryOptions={setCountryOptions}
         setEditDomain={setEditDomain}
@@ -737,6 +736,7 @@ export default function DomainManager() {
         totalPages={totalPagesHistory}
         totalItems={filteredHistory.length}
         rowsPerPage={rowsPerPage}
+        isLoading={isLoading}
         onPrev={() => setPageHistory(p => Math.max(p - 1, 1))}
         onNext={() => setPageHistory(p => Math.min(p + 1, totalPagesHistory))}
         historyActionId={historyActionId}

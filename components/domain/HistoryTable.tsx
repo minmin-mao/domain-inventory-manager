@@ -10,6 +10,7 @@ type Props = {
   totalPages: number;
   totalItems: number;
   rowsPerPage: number;
+  isLoading: boolean;
   onPrev: () => void;
   onNext: () => void;
   histories: DomainHistoryItem[];
@@ -23,6 +24,7 @@ export default function HistoryTable({
   totalPages,
   totalItems,
   rowsPerPage,
+  isLoading,
   onPrev,
   onNext,
   histories,
@@ -49,52 +51,63 @@ export default function HistoryTable({
           </thead>
 
           <tbody className="divide-y divide-zinc-800">
-            {histories.map((item, index) => {
-              const daysLeft = getDaysLeft(item.expiry ?? undefined);
-              const isBusy = historyActionId === item.id;
+            {isLoading ? (
+              <tr>
+                <td
+                  colSpan={9}
+                  className="px-4 py-10 text-center text-sm text-zinc-400"
+                >
+                  Loading history...
+                </td>
+              </tr>
+            ) : (
+              histories.map((item, index) => {
+                const daysLeft = getDaysLeft(item.expiry ?? undefined);
+                const isBusy = historyActionId === item.id;
 
-              return (
-                <tr key={item.id} className="hover:bg-zinc-800/40 transition">
-                  <td className="px-4 py-3">{index + 1}</td>
-                  <td className="px-4 py-3 font-medium">{item.domain}</td>
-                  <td className="px-4 py-3">
-                    <span className="rounded-full bg-red-800/15 px-2 py-1 text-xs text-red-400">
-                      {item.status}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3">{item.hosting}</td>
-                  <td className="px-4 py-3">{item.project}</td>
-                  <td className="px-4 py-3 text-zinc-400">{item.country}</td>
-                  <td className="px-4 py-3">
-                    {item.expiry
-                      ? new Date(item.expiry).toISOString().split("T")[0]
-                      : "-"}
-                  </td>
-                  <td className="px-4 py-3">
-                    {daysLeft !== null ? `${daysLeft} days` : "-"}
-                  </td>
-                  <td className="px-4 py-3">
-                    {item.canUndo ? (
-                      <Button
-                        variant="secondary"
-                        disabled={isBusy}
-                        onClick={() => onUndoHistory(item)}
-                      >
-                        {isBusy ? "Undoing..." : "Undo"}
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        disabled={isBusy || item.id.startsWith("legacy-")}
-                        onClick={() => onDeleteHistory(item)}
-                      >
-                        {isBusy ? "Deleting..." : "Delete"}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                return (
+                  <tr key={item.id} className="hover:bg-zinc-800/40 transition">
+                    <td className="px-4 py-3">{index + 1}</td>
+                    <td className="px-4 py-3 font-medium">{item.domain}</td>
+                    <td className="px-4 py-3">
+                      <span className="rounded-full bg-red-800/15 px-2 py-1 text-xs text-red-400">
+                        {item.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">{item.hosting}</td>
+                    <td className="px-4 py-3">{item.project}</td>
+                    <td className="px-4 py-3 text-zinc-400">{item.country}</td>
+                    <td className="px-4 py-3">
+                      {item.expiry
+                        ? new Date(item.expiry).toISOString().split("T")[0]
+                        : "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {daysLeft !== null ? `${daysLeft} days` : "-"}
+                    </td>
+                    <td className="px-4 py-3">
+                      {item.canUndo ? (
+                        <Button
+                          variant="secondary"
+                          disabled={isBusy}
+                          onClick={() => onUndoHistory(item)}
+                        >
+                          {isBusy ? "Undoing..." : "Undo"}
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          disabled={isBusy || item.id.startsWith("legacy-")}
+                          onClick={() => onDeleteHistory(item)}
+                        >
+                          {isBusy ? "Deleting..." : "Delete"}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
 

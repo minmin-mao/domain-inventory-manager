@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { capitalizeText } from "@/lib/domain/textUtils";
 import { NextResponse } from "next/server";
 
 type DomainHistoryCreateInput = {
@@ -17,15 +18,16 @@ type UseDomainBody = {
   country?: string;
 };
 
-const uppercaseText = (value: string | undefined) => value?.trim().toUpperCase();
+const normalizeText = (value: string | undefined) =>
+  value ? capitalizeText(value.trim()) : undefined;
 
 export async function POST(req: Request) {
   try {
     const body = (await req.json()) as UseDomainBody;
 
     const domainId = body.id?.trim();
-    const project = uppercaseText(body.project);
-    const country = uppercaseText(body.country);
+    const project = normalizeText(body.project);
+    const country = normalizeText(body.country);
 
     if (!domainId) {
       return NextResponse.json({ error: "Missing domain id" }, { status: 400 });

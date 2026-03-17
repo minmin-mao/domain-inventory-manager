@@ -8,6 +8,7 @@ type Props = {
   totalPages: number
   totalItems: number
   rowsPerPage: number
+  isLoading: boolean
   onPrev: () => void
   onNext: () => void
   
@@ -17,9 +18,13 @@ type Props = {
   duplicateDomain: DomainItem | null;
   highlightDomainId: string | null;
 
+  hostingOptions: string[];
+  accountOptions: string[];
   projectOptions: string[];
   countryOptions: string[];
 
+  setHostingOptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setAccountOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setProjectOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setCountryOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setEditDomain: React.Dispatch<React.SetStateAction<DomainItem | null>>;
@@ -37,6 +42,7 @@ export default function DomainTable(props: Props) {
     totalPages,
     totalItems,
     rowsPerPage,
+    isLoading,
     onPrev,
     onNext,
     domains,
@@ -44,8 +50,12 @@ export default function DomainTable(props: Props) {
     highlightDomainId,
     editingId,
     editDomain,
+    hostingOptions,
+    accountOptions,
     projectOptions,
     countryOptions,
+    setHostingOptions,
+    setAccountOptions,
     setProjectOptions,
     setCountryOptions,
     setEditDomain,
@@ -89,25 +99,40 @@ export default function DomainTable(props: Props) {
           </thead>
 
           <tbody className="divide-y divide-zinc-800">
-            {domains.map((item, index) => (
-              <DomainRow
-                key={item.id}
-                item={item}
-                index={index}
-                highlightDomainId={highlightDomainId}
-                editingId={editingId}
-                editDomain={editDomain}
-                projectOptions={projectOptions}
-                countryOptions={countryOptions}
-                setProjectOptions={setProjectOptions}
-                setCountryOptions={setCountryOptions}
-                setEditDomain={setEditDomain}
-                handleEdit={handleEdit}
-                handleSave={handleSave}
-                handleDeleteDomain={handleDeleteDomain}
-                setEditingId={setEditingId}
-              />
-            ))}
+            {isLoading ? (
+              <tr>
+                <td
+                  colSpan={10}
+                  className="px-4 py-10 text-center text-sm text-zinc-400"
+                >
+                  Loading domains...
+                </td>
+              </tr>
+            ) : (
+              domains.map((item, index) => (
+                <DomainRow
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  highlightDomainId={highlightDomainId}
+                  editingId={editingId}
+                  editDomain={editDomain}
+                  hostingOptions={hostingOptions}
+                  accountOptions={accountOptions}
+                  projectOptions={projectOptions}
+                  countryOptions={countryOptions}
+                  setHostingOptions={setHostingOptions}
+                  setAccountOptions={setAccountOptions}
+                  setProjectOptions={setProjectOptions}
+                  setCountryOptions={setCountryOptions}
+                  setEditDomain={setEditDomain}
+                  handleEdit={handleEdit}
+                  handleSave={handleSave}
+                  handleDeleteDomain={handleDeleteDomain}
+                  setEditingId={setEditingId}
+                />
+              ))
+            )}
           </tbody>
         </table>
           <div className="border-t border-zinc-800 px-4 py-3 flex items-center justify-between text-sm text-zinc-400">

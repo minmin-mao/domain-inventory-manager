@@ -1,6 +1,7 @@
 import Button from "@/components/Button";
 import SmartDropdown from "@/components/SmartDropdown";
 import { getDaysLeft } from "@/lib/domain/domainUtils";
+import { capitalizeText } from "@/lib/domain/textUtils";
 import type { DomainItem } from "@/lib/domain/domainTypes";
 
 type Props = {
@@ -10,9 +11,13 @@ type Props = {
   editingId: string | null;
   editDomain: DomainItem | null;
 
+  hostingOptions: string[];
+  accountOptions: string[];
   projectOptions: string[];
   countryOptions: string[];
 
+  setHostingOptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setAccountOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setProjectOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setCountryOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setEditDomain: React.Dispatch<React.SetStateAction<DomainItem | null>>;
@@ -30,8 +35,12 @@ export default function DomainRow(props: Props) {
     highlightDomainId,
     editingId,
     editDomain,
+    hostingOptions,
+    accountOptions,
     projectOptions,
     countryOptions,
+    setHostingOptions,
+    setAccountOptions,
     setProjectOptions,
     setCountryOptions,
     setEditDomain,
@@ -40,8 +49,6 @@ export default function DomainRow(props: Props) {
     handleDeleteDomain,
     setEditingId
   } = props;
-
-  const toUpperText = (value: string) => value.toUpperCase();
 
   const daysLeft = getDaysLeft(item.expiry ?? undefined);
 
@@ -78,7 +85,22 @@ export default function DomainRow(props: Props) {
       <td className="px-4 py-3">{index + 1}</td>
 
       {/* Domain */}
-      <td className="px-4 py-3 font-medium">{item.domain}</td>
+      <td className="px-4 py-3 font-medium">
+        {editingId === item.id ? (
+          <input
+            type="text"
+            className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1"
+            value={editDomain?.domain || ""}
+            onChange={(e) =>
+              setEditDomain((prev) =>
+                prev ? { ...prev, domain: e.target.value.toLowerCase() } : prev
+              )
+            }
+          />
+        ) : (
+          item.domain
+        )}
+      </td>
 
       {/* Status */}
       <td className="px-4 py-3">
@@ -88,10 +110,42 @@ export default function DomainRow(props: Props) {
       </td>
 
       {/* Hosting */}
-      <td className="px-4 py-3">{item.hosting}</td>
+      <td className="px-4 py-3">
+        {editingId === item.id ? (
+          <SmartDropdown
+            value={editDomain?.hosting || ""}
+            setValue={(v) =>
+              setEditDomain((prev) =>
+                prev ? { ...prev, hosting: capitalizeText(v) } : prev
+              )
+            }
+            options={hostingOptions}
+            setOptions={setHostingOptions}
+            placeholder="Hosting"
+          />
+        ) : (
+          item.hosting
+        )}
+      </td>
 
       {/* Account */}
-      <td className="px-4 py-3">{item.account}</td>
+      <td className="px-4 py-3">
+        {editingId === item.id ? (
+          <SmartDropdown
+            value={editDomain?.account || ""}
+            setValue={(v) =>
+              setEditDomain((prev) =>
+                prev ? { ...prev, account: capitalizeText(v) } : prev
+              )
+            }
+            options={accountOptions}
+            setOptions={setAccountOptions}
+            placeholder="Account"
+          />
+        ) : (
+          item.account
+        )}
+      </td>
 
       {/* Project */}
       <td className="px-4 py-3">
@@ -100,7 +154,7 @@ export default function DomainRow(props: Props) {
             value={editDomain?.project || ""}
             setValue={(v) =>
               setEditDomain(prev =>
-                prev ? { ...prev, project: toUpperText(v) } : prev
+                prev ? { ...prev, project: capitalizeText(v) } : prev
               )
             }
             options={projectOptions}
@@ -119,7 +173,7 @@ export default function DomainRow(props: Props) {
             value={editDomain?.country || ""}
             setValue={(v) =>
               setEditDomain(prev =>
-                prev ? { ...prev, country: toUpperText(v) } : prev
+                prev ? { ...prev, country: capitalizeText(v) } : prev
               )
             }
             options={countryOptions}
