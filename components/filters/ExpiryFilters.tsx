@@ -10,7 +10,7 @@ export function ExpiryFilter({ value, onChange }: Props) {
   return (
     <select
       value={value}
-      onChange={(e) => onChange(e.target.value as any)}
+      onChange={(e) => onChange(e.target.value as ExpiryFilterOption)}
       className="h-9 rounded-lg border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-200
                 focus:outline-none focus:ring-2 focus:ring-zinc-600
                 hover:border-zinc-500 transition"

@@ -26,3 +26,17 @@ model Domain {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 }
+
+model DomainHistory {
+  id        String   @id @default(cuid())
+  domainId  String
+  domain    String
+  hosting   String
+  expiry    DateTime
+  project   String
+  country   String
+  createdAt DateTime @default(now())
+
+  @@index([domainId])
+  @@index([createdAt])
+}

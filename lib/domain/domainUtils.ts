@@ -40,7 +40,15 @@ export function isExpired(expiry?: string | null) {
   return new Date(expiry).getTime() < nowUtc().getTime();
 }
 
-export function applyFilters(domains: DomainItem[], filters: DomainFilters) {
+type FilterableRecord = Pick<DomainItem, "domain" | "project" | "country" | "expiry"> & {
+  hosting?: string | null
+  hostingProvider?: string | null
+};
+
+export function applyFilters<T extends FilterableRecord>(
+  domains: T[],
+  filters: DomainFilters
+) {
   const s = filters.search.trim().toLowerCase();
 
   return domains.filter((d) => {
@@ -90,8 +98,6 @@ export function applyFilters(domains: DomainItem[], filters: DomainFilters) {
     return true;
   });
 }
-
-
 
 
 

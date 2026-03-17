@@ -13,8 +13,8 @@ type Props = {
   projectOptions: string[];
   countryOptions: string[];
 
-  setProjectOptions: (v: string[]) => void;
-  setCountryOptions: (v: string[]) => void;
+  setProjectOptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setCountryOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setEditDomain: React.Dispatch<React.SetStateAction<DomainItem | null>>;
 
   handleEdit: (item: DomainItem) => void;
@@ -40,6 +40,8 @@ export default function DomainRow(props: Props) {
     handleDeleteDomain,
     setEditingId
   } = props;
+
+  const toUpperText = (value: string) => value.toUpperCase();
 
   const daysLeft = getDaysLeft(item.expiry);
 
@@ -97,7 +99,9 @@ export default function DomainRow(props: Props) {
           <SmartDropdown
             value={editDomain?.project || ""}
             setValue={(v) =>
-              setEditDomain(prev => prev ? { ...prev, project: v } : prev)
+              setEditDomain(prev =>
+                prev ? { ...prev, project: toUpperText(v) } : prev
+              )
             }
             options={projectOptions}
             setOptions={setProjectOptions}
@@ -114,7 +118,9 @@ export default function DomainRow(props: Props) {
           <SmartDropdown
             value={editDomain?.country || ""}
             setValue={(v) =>
-              setEditDomain(prev => prev ? { ...prev, country: v } : prev)
+              setEditDomain(prev =>
+                prev ? { ...prev, country: toUpperText(v) } : prev
+              )
             }
             options={countryOptions}
             setOptions={setCountryOptions}

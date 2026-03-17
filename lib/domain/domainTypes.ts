@@ -22,6 +22,19 @@ export type DomainItem = {
   }
 }
 
+export type DomainHistoryItem = {
+  id: string
+  domainId: string
+  domain: string
+  hosting: string
+  expiry: string
+  project: string
+  country: string
+  createdAt: string
+  status: "taken"
+  canUndo: boolean
+}
+
 export type ExpiryFilterOption = 'all' | 'expired' | 'le30' | 'le60' ;
 
 export type DomainFilters = {

@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
+const uppercaseText = (value: unknown) =>
+  typeof value === "string" ? value.trim().toUpperCase() : "";
+
 // GET all domains
 export async function GET() {
   const domains = await prisma.domain.findMany({
@@ -17,10 +20,10 @@ export async function POST(req: Request) {
   const domain = await prisma.domain.create({
     data: {
       domain: body.domain,
-      hosting: body.hosting,
-      account: body.account,
-      project: body.project,
-      country: body.country,
+      hosting: uppercaseText(body.hosting),
+      account: uppercaseText(body.account),
+      project: uppercaseText(body.project),
+      country: uppercaseText(body.country),
       expiry: new Date(body.expiry),
       status: "available",
     },
@@ -37,10 +40,10 @@ export async function PUT(req: Request) {
     where: { id: body.id },
     data: {
       domain: body.domain,
-      hosting: body.hosting,
-      account: body.account,
-      project: body.project,
-      country: body.country,
+      hosting: uppercaseText(body.hosting),
+      account: uppercaseText(body.account),
+      project: uppercaseText(body.project),
+      country: uppercaseText(body.country),
       expiry: new Date(body.expiry),
       status: body.status,
     },

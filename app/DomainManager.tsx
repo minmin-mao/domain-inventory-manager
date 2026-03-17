@@ -14,10 +14,15 @@ import { FilterBar } from "@/components/filters/FilterBar";
 // Utilities
 import { normalizeDomain } from "@/lib/domain/domainUtils";
 import { applyFilters } from "@/lib/domain/domainUtils";
+import type {
+  DomainFilters,
+  DomainHistoryItem,
+  DomainItem,
+} from "@/lib/domain/domainTypes";
 
 // React
 import { useEffect, useState, useRef } from "react";
-import { SelectInstance } from "react-select";
+import type { SelectInstance } from "react-select";
 
 
 // ================================
@@ -29,48 +34,19 @@ type Option = {
   value: string;
 };
 
-type DomainItem = {
-  id: string;
-  domain: string;
-  hosting: string;
-  expiry: string;
-  account: string;
-  project: string;
-  country: string;
-  status: "taken" | "available";
-
-  usedAt?: string;
-  usedForProject?: string;
-  usedForCountry?: string;
-
-  previousState?: {
-    status: "available" | "taken";
-    usedAt?: string;
-    usedForProject?: string;
-    usedForCountry?: string;
-  };
-};
-
-type DomainFilters = {
-  search: string;
-  expiry: "all" | "le30" | "le60" | "expired";
-  hostingProvider: string | null;
-  project: string | null;
-  country: string | null;
-};
-
-
 // ================================
 // Component
 // ================================
 
 export default function DomainManager() {
+  const toUpperText = (value: string) => value.toUpperCase();
 
   // ================================
   // Domain Inventory State
   // ================================
 
   const [domains, setDomains] = useState<DomainItem[]>([]);
+  const [history, setHistory] = useState<DomainHistoryItem[]>([]);
 
   // form fields
   const [domain, setDomain] = useState("");
@@ -87,6 +63,7 @@ export default function DomainManager() {
   const [searchProject, setSearchProject] = useState("");
   const [searchCountry, setSearchCountry] = useState("");
   const [strictCountry, setStrictCountry] = useState(false);
+  const [requestError, setRequestError] = useState("");
 
   // edit state
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -116,13 +93,51 @@ export default function DomainManager() {
   // pagination state
   const [pageAvailable, setPageAvailable] = useState(1);
   const [pageHistory, setPageHistory] = useState(1);
+  const [historyActionId, setHistoryActionId] = useState<string | null>(null);
 
   const rowsPerPage = 10;
 
+  const loadInventoryData = async () => {
+    const [domainsRes, historyRes] = await Promise.all([
+      fetch("/api/domains"),
+      fetch("/api/domain-history"),
+    ]);
+
+    const domainsData = domainsRes.ok ? await domainsRes.json() : [];
+    const historyData = historyRes.ok ? await historyRes.json() : [];
+
+    setDomains(domainsData);
+    setHistory(historyData);
+  };
+
   useEffect(() => {
-    fetch("/api/domains")
-      .then(res => res.json())
-      .then(data => setDomains(data));
+    let cancelled = false;
+
+    const load = async () => {
+      const [domainsRes, historyRes] = await Promise.all([
+        fetch("/api/domains"),
+        fetch("/api/domain-history"),
+      ]);
+
+      const domainsData = domainsRes.ok ? await domainsRes.json() : [];
+      const historyData = historyRes.ok ? await historyRes.json() : [];
+
+      if (cancelled) return;
+
+      setDomains(domainsData);
+      setHistory(historyData);
+    };
+
+    void load().catch((error) => {
+      console.error("Failed to load inventory data", error);
+      if (cancelled) return;
+      setDomains([]);
+      setHistory([]);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
 
@@ -132,22 +147,18 @@ export default function DomainManager() {
 
   const availableDomains = domains.filter(d => d.status === "available");
 
-  const usedDomains = domains
-    .filter(d => d.status === "taken")
-    .sort((a, b) => (b.usedAt || "").localeCompare(a.usedAt || ""));
-
   const filteredAvailable = applyFilters(availableDomains, filters);
-  const filteredUsed = applyFilters(usedDomains, filters);
+  const filteredHistory = applyFilters(history, filters);
 
   const totalPagesAvailable = Math.ceil(filteredAvailable.length / rowsPerPage);
-  const totalPagesHistory = Math.ceil(filteredUsed.length / rowsPerPage);
+  const totalPagesHistory = Math.ceil(filteredHistory.length / rowsPerPage);
 
   const paginatedAvailable = filteredAvailable.slice(
     (pageAvailable - 1) * rowsPerPage,
     pageAvailable * rowsPerPage
   );
 
-  const paginatedHistory = filteredUsed.slice(
+  const paginatedHistory = filteredHistory.slice(
     (pageHistory - 1) * rowsPerPage,
     pageHistory * rowsPerPage
   );
@@ -226,9 +237,7 @@ export default function DomainManager() {
       body: JSON.stringify(newDomain),
     });
 
-    const res = await fetch("/api/domains");
-    const data = await res.json();
-    setDomains(data);
+    await loadInventoryData();
 
     setDomain("");
     setHosting("");
@@ -256,9 +265,7 @@ export default function DomainManager() {
       method: "DELETE"
     });
 
-    const res = await fetch("/api/domains");
-    const data = await res.json();
-    setDomains(data);
+    await loadInventoryData();
   };
 
   const handleGoToDuplicate = () => {
@@ -277,32 +284,48 @@ export default function DomainManager() {
     }, 5000); };
 
 
-  const handleUseDomain = (id: string) => {
+  const handleUseDomain = async (id: string) => {
+    const projectValue = searchProject.trim();
+    const requestCountry = searchCountry.trim().toUpperCase();
 
-    const now = new Date().toISOString();
+    if (!projectValue) {
+      setRequestError("Project name is required.");
+      return;
+    }
 
-    setDomains(prev =>
-      prev.map(d =>
-        d.id === id
-          ? {
-              ...d,
-              previousState: {
-                status: d.status,
-                usedAt: d.usedAt,
-                usedForProject: d.usedForProject,
-                usedForCountry: d.usedForCountry,
-              },
-              status: "taken",
-              usedAt: now,
-              usedForProject: searchProject.trim(),
-              usedForCountry: searchCountry.trim(),
-            }
-          : d
-      )
-    );
+    if (!requestCountry) {
+      setRequestError("Country is required before you can use a domain.");
+      return;
+    }
 
+    const res = await fetch("/api/domains/use", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        id,
+        project: projectValue,
+        country: requestCountry,
+      }),
+    });
+
+    const contentType = res.headers.get("content-type") || "";
+    const data = contentType.includes("application/json")
+      ? await res.json()
+      : { error: "Unexpected server response." };
+
+    if (!res.ok) {
+      setRequestError(data.error || "Failed to use domain.");
+      return;
+    }
+
+    setRequestError("");
+    setSearchCountry(requestCountry);
     setMatchedDomains([]);
     setCurrentIndex(0);
+    setProviderWarning("");
+    await loadInventoryData();
   };
 
   const handleSuggestDomain = () => {
@@ -310,9 +333,16 @@ export default function DomainManager() {
     const countryKey = searchCountry.trim().toLowerCase();
 
     if (!projectKey) {
-      alert("Please enter a project name");
+      setRequestError("Project name is required.");
       return;
     }
+
+    if (!countryKey) {
+      setRequestError("Country is required to request a domain.");
+      return;
+    }
+
+    setRequestError("");
 
     const matches = domains.filter((d) => {
       if (d.status !== "available") return false;
@@ -347,23 +377,48 @@ export default function DomainManager() {
   };
 
 
-  const handleUndoDomain = (id: string) => {
+  const handleUndoHistory = async (item: DomainHistoryItem) => {
+    const ok = confirm(`Undo "${item.domain}" and move it back to available domains?`);
+    if (!ok) return;
 
-    setDomains(prev =>
-      prev.map(d => {
+    setHistoryActionId(item.id);
 
-        if (d.id !== id || !d.previousState) return d;
+    const res = await fetch(`/api/domain-history/${item.id}`, {
+      method: "PATCH",
+    });
 
-        return {
-          ...d,
-          status: d.previousState.status,
-          usedAt: d.previousState.usedAt,
-          usedForProject: d.previousState.usedForProject,
-          usedForCountry: d.previousState.usedForCountry,
-          previousState: undefined,
-        };
-      })
-    );
+    const data = await res.json();
+
+    if (!res.ok) {
+      setHistoryActionId(null);
+      alert(data.error || "Failed to undo history row.");
+      return;
+    }
+
+    await loadInventoryData();
+    setHistoryActionId(null);
+  };
+
+  const handleDeleteHistory = async (item: DomainHistoryItem) => {
+    const ok = confirm(`Delete the history row for "${item.domain}"?`);
+    if (!ok) return;
+
+    setHistoryActionId(item.id);
+
+    const res = await fetch(`/api/domain-history/${item.id}`, {
+      method: "DELETE",
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setHistoryActionId(null);
+      alert(data.error || "Failed to delete history row.");
+      return;
+    }
+
+    await loadInventoryData();
+    setHistoryActionId(null);
   };
 
 
@@ -391,9 +446,7 @@ export default function DomainManager() {
     setEditingId(null);
     setEditDomain(null);
 
-    const res = await fetch("/api/domains");
-    const data = await res.json();
-    setDomains(data);
+    await loadInventoryData();
   };
   
   
@@ -428,7 +481,7 @@ export default function DomainManager() {
           <SmartDropdown
             ref={hostingRef}
             value={hosting}
-            setValue={setHosting}
+            setValue={(value) => setHosting(toUpperText(value))}
             options={hostingOptions}
             setOptions={setHostingOptions}
             placeholder="Hosting provider"
@@ -442,7 +495,7 @@ export default function DomainManager() {
 
           <SmartDropdown
             value={account}
-            setValue={setAccount}
+            setValue={(value) => setAccount(toUpperText(value))}
             options={accountOptions}
             setOptions={setAccountOptions}
             placeholder="Account"
@@ -450,7 +503,7 @@ export default function DomainManager() {
 
           <SmartDropdown
             value={project}
-            setValue={setProject}
+            setValue={(value) => setProject(toUpperText(value))}
             options={projectOptions}
             setOptions={setProjectOptions}
             placeholder="Project Name"
@@ -458,7 +511,7 @@ export default function DomainManager() {
 
           <SmartDropdown
             value={country}
-            setValue={setCountry}
+            setValue={(value) => setCountry(toUpperText(value))}
             options={countryOptions}
             setOptions={setCountryOptions}
             placeholder="Country"
@@ -496,16 +549,29 @@ export default function DomainManager() {
         <Input
           placeholder="Project Name"
           value={searchProject}
-          onChange={(e) => setSearchProject(e.target.value)}
+          onChange={(e) => {
+            setSearchProject(toUpperText(e.target.value));
+            if (requestError) setRequestError("");
+          }}
         />
 
         <Input
-          placeholder="Preferred country (optional)"
+          placeholder="Country"
           value={searchCountry}
-          onChange={(e) => setSearchCountry(e.target.value)}
+          onChange={(e) => {
+            setSearchCountry(toUpperText(e.target.value));
+            if (requestError) setRequestError("");
+          }}
+          required
         />
 
       </div>
+
+      {requestError && (
+        <p className="mt-3 text-sm text-red-400">
+          {requestError}
+        </p>
+      )}
 
       <div className="mt-4 flex justify-end">
         <Button
@@ -615,26 +681,16 @@ export default function DomainManager() {
       />
 
       <HistoryTable
-        domains={paginatedHistory}
+        histories={paginatedHistory}
         page={pageHistory}
         totalPages={totalPagesHistory}
-        totalItems={filteredUsed.length}
+        totalItems={filteredHistory.length}
         rowsPerPage={rowsPerPage}
         onPrev={() => setPageHistory(p => Math.max(p - 1, 1))}
         onNext={() => setPageHistory(p => Math.min(p + 1, totalPagesHistory))}
-        editingId={editingId}
-        highlightDomainId={highlightDomainId}
-        editDomain={editDomain}
-        projectOptions={projectOptions}
-        countryOptions={countryOptions}
-        setProjectOptions={setProjectOptions}
-        setCountryOptions={setCountryOptions}
-        setEditDomain={setEditDomain}
-        handleEdit={handleEdit}
-        handleSave={handleSave}
-        handleDeleteDomain={handleDeleteDomain}
-        handleUndoDomain={handleUndoDomain}
-        setEditingId={setEditingId}
+        historyActionId={historyActionId}
+        onUndoHistory={handleUndoHistory}
+        onDeleteHistory={handleDeleteHistory}
       />
     </>
   );

@@ -20,8 +20,8 @@ type Props = {
   projectOptions: string[];
   countryOptions: string[];
 
-  setProjectOptions: (v: string[]) => void;
-  setCountryOptions: (v: string[]) => void;
+  setProjectOptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setCountryOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setEditDomain: React.Dispatch<React.SetStateAction<DomainItem | null>>;
 
   handleEdit: (item: DomainItem) => void;
