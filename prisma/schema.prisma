@@ -6,25 +6,20 @@ datasource db {
   provider = "postgresql"
 }
 
-enum DomainStatus {
-  available
-  taken
-}
-
 model Domain {
-  id             String   @id @default(cuid())
-  domain         String   @unique
+  id             String       @id @default(cuid())
+  domain         String       @unique
   hosting        String
   account        String
   project        String
   country        String
   expiry         DateTime
-  status         DomainStatus
   usedAt         DateTime?
   usedForProject String?
   usedForCountry String?
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  status         DomainStatus
 }
 
 model DomainHistory {
@@ -39,4 +34,9 @@ model DomainHistory {
 
   @@index([domainId])
   @@index([createdAt])
+}
+
+enum DomainStatus {
+  available
+  taken
 }
