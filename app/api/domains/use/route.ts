@@ -5,7 +5,7 @@ type DomainHistoryCreateInput = {
   domainId: string;
   domain: string;
   hosting: string;
-  expiry: Date;
+  expiry: Date | null;
   project: string;
   country: string;
   createdAt: Date;
@@ -78,7 +78,7 @@ export async function POST(req: Request) {
               domainId: domain.id,
               domain: domain.domain,
               hosting: domain.hosting,
-              expiry: domain.expiry,
+              ...(domain.expiry ? { expiry: domain.expiry } : {}),
               project,
               country,
               createdAt: now,

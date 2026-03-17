@@ -83,6 +83,7 @@ const SmartDropdown = forwardRef<SelectInstance<Option, false>, Props>(
     const handleInputChange = (nextValue: string, meta: InputActionMeta) => {
       if (meta.action === "input-change") {
         setInputValue(nextValue);
+        setValue?.(nextValue);
       }
     };
 

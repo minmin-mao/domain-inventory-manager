@@ -2,7 +2,7 @@ export type DomainItem = {
   id: string
   domain: string
   hosting: string
-  expiry: string
+  expiry: string | null
   account: string
   project: string
   country: string
@@ -27,7 +27,7 @@ export type DomainHistoryItem = {
   domainId: string
   domain: string
   hosting: string
-  expiry: string
+  expiry: string | null
   project: string
   country: string
   createdAt: string

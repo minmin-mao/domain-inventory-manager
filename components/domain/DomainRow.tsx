@@ -43,7 +43,7 @@ export default function DomainRow(props: Props) {
 
   const toUpperText = (value: string) => value.toUpperCase();
 
-  const daysLeft = getDaysLeft(item.expiry);
+  const daysLeft = getDaysLeft(item.expiry ?? undefined);
 
   let expiryLabel: string | null = null;
   let expiryColor = "";
@@ -135,9 +135,10 @@ export default function DomainRow(props: Props) {
       <td className="px-4 py-3">
         {editingId === item.id ? (
           <input
-            type="date"
+            type="text"
             className="bg-zinc-900 border border-zinc-700 px-2 py-1 rounded"
             value={editDomain?.expiry || ""}
+            placeholder="YYYY-MM-DD"
             onChange={(e) =>
               setEditDomain(prev =>
                 prev ? { ...prev, expiry: e.target.value } : prev

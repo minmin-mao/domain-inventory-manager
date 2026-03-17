@@ -13,7 +13,7 @@ model Domain {
   account        String
   project        String
   country        String
-  expiry         DateTime
+  expiry         DateTime?
   usedAt         DateTime?
   usedForProject String?
   usedForCountry String?
@@ -27,7 +27,7 @@ model DomainHistory {
   domainId  String
   domain    String
   hosting   String
-  expiry    DateTime
+  expiry    DateTime?
   project   String
   country   String
   createdAt DateTime @default(now())

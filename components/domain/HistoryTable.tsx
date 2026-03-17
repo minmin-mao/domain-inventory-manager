@@ -50,7 +50,7 @@ export default function HistoryTable({
 
           <tbody className="divide-y divide-zinc-800">
             {histories.map((item, index) => {
-              const daysLeft = getDaysLeft(item.expiry);
+              const daysLeft = getDaysLeft(item.expiry ?? undefined);
               const isBusy = historyActionId === item.id;
 
               return (

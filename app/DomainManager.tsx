@@ -40,6 +40,19 @@ type Option = {
 
 export default function DomainManager() {
   const toUpperText = (value: string) => value.toUpperCase();
+  const normalizeExpiryInput = (value: string) => {
+    const trimmed = value.trim();
+    const localDateMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+
+    if (localDateMatch) {
+      return `${localDateMatch[3]}-${localDateMatch[2]}-${localDateMatch[1]}`;
+    }
+
+    return trimmed;
+  };
+
+  const isValidExpiryInput = (value: string) =>
+    /^\d{4}-\d{2}-\d{2}$/.test(value) || /^\d{2}\/\d{2}\/\d{4}$/.test(value);
 
   // ================================
   // Domain Inventory State
@@ -170,6 +183,7 @@ export default function DomainManager() {
 
   const hostingRef = useRef<SelectInstance<Option, false> | null>(null);
   const domainRef = useRef<HTMLInputElement | null>(null);
+  const expiryRef = useRef<HTMLInputElement | null>(null);
 
   const focusNext = (ref: { current: { focus: () => void } | null }) => {
     ref.current?.focus();
@@ -201,9 +215,23 @@ export default function DomainManager() {
   // ================================
 
   const handleAddDomain = async () => {
+    const resolvedExpiry = normalizeExpiryInput(
+      expiry || expiryRef.current?.value || ""
+    );
+    const missingFields = [
+      !domain.trim() ? "Domain" : null,
+      !hosting.trim() ? "Hosting" : null,
+      !account.trim() ? "Account" : null,
+      !project.trim() ? "Project" : null,
+    ].filter(Boolean);
 
-    if (!domain || !hosting || !project || !account) {
-      alert("Domain, Hosting, Account, and Project are required");
+    if (missingFields.length > 0) {
+      alert(`Missing required fields: ${missingFields.join(", ")}`);
+      return;
+    }
+
+    if (resolvedExpiry && !isValidExpiryInput(resolvedExpiry)) {
+      alert("Expiry must be in YYYY-MM-DD or DD/MM/YYYY format.");
       return;
     }
 
@@ -222,20 +250,30 @@ export default function DomainManager() {
       id: crypto.randomUUID(),
       domain: normalizedInput,
       hosting,
-      expiry,
+      expiry: resolvedExpiry || null,
       account,
       project,
       country: (country.trim().toUpperCase() || "-"),
       status: "available",
     };
 
-    await fetch("/api/domains", {
+    const res = await fetch("/api/domains", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(newDomain),
     });
+
+    const contentType = res.headers.get("content-type") || "";
+    const data = contentType.includes("application/json")
+      ? await res.json()
+      : { error: "Unexpected server response." };
+
+    if (!res.ok) {
+      alert(data.error || "Failed to create domain.");
+      return;
+    }
 
     await loadInventoryData();
 
@@ -244,6 +282,7 @@ export default function DomainManager() {
     setProject("");
     setCountry("");
     setAccount("");
+    setExpiry("");
 
     domainRef.current?.focus();
   };
@@ -435,13 +474,23 @@ export default function DomainManager() {
 
     if (!editDomain) return;
 
-    await fetch(`/api/domains`, {
+    const res = await fetch(`/api/domains`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify(editDomain),
     });
+
+    const contentType = res.headers.get("content-type") || "";
+    const data = contentType.includes("application/json")
+      ? await res.json()
+      : { error: "Unexpected server response." };
+
+    if (!res.ok) {
+      alert(data.error || "Failed to update domain.");
+      return;
+    }
 
     setEditingId(null);
     setEditDomain(null);
@@ -488,9 +537,11 @@ export default function DomainManager() {
           />
 
           <Input
-            type="date"
+            ref={expiryRef}
+            type="text"
             value={expiry}
-            onChange={(e) => setExpiry(e.target.value)}
+            placeholder="YYYY-MM-DD or DD/MM/YYYY"
+            onChange={(e) => setExpiry(normalizeExpiryInput(e.target.value))}
           />
 
           <SmartDropdown
