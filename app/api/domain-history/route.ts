@@ -34,6 +34,7 @@ export async function GET(req: Request) {
     const { searchParams } = new URL(req.url);
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
+    const includeTotal = searchParams.get("includeTotal") !== "false";
     const search = searchParams.get("search")?.trim().toLowerCase() ?? "";
     const hosting = searchParams.get("hostingProvider");
     const project = searchParams.get("project");
@@ -124,7 +125,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json({
       items,
-      total: filtered.length,
+      total: includeTotal ? filtered.length : undefined,
       page,
       pageSize,
     });

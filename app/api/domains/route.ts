@@ -101,17 +101,15 @@ export async function GET(req: Request) {
 
   const page = parsePositiveInt(searchParams.get("page"), 1);
   const pageSize = parsePositiveInt(searchParams.get("pageSize"), 10);
+  const includeTotal = searchParams.get("includeTotal") !== "false";
   const skip = (page - 1) * pageSize;
-
-  const [items, total] = await Promise.all([
-    prisma.domain.findMany({
-      where,
-      orderBy: { createdAt: "desc" },
-      skip,
-      take: pageSize,
-    }),
-    prisma.domain.count({ where }),
-  ]);
+  const items = await prisma.domain.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    skip,
+    take: pageSize,
+  });
+  const total = includeTotal ? await prisma.domain.count({ where }) : undefined;
 
   return NextResponse.json({
     items,

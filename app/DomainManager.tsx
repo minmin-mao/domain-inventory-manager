@@ -23,7 +23,7 @@ import type {
 } from "@/lib/domain/domainTypes";
 
 // React
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SelectInstance } from "react-select";
 
 
@@ -141,8 +141,39 @@ export default function DomainManager() {
   const [isDomainsLoading, setIsDomainsLoading] = useState(true);
   const [isHistoryLoading, setIsHistoryLoading] = useState(true);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
+  const [isAddingDomain, setIsAddingDomain] = useState(false);
+  const [isUsingDomain, setIsUsingDomain] = useState(false);
+  const [isSuggestingDomain, setIsSuggestingDomain] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const rowsPerPage = DEFAULT_ROWS_PER_PAGE;
+  const totalAvailableRef = useRef(0);
+  const totalHistoryRef = useRef(0);
+  const suggestCacheRef = useRef<Map<string, DomainItem[]>>(new Map());
+
+  useEffect(() => {
+    totalAvailableRef.current = totalAvailable;
+  }, [totalAvailable]);
+
+  useEffect(() => {
+    totalHistoryRef.current = totalHistory;
+  }, [totalHistory]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(filters.search);
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [filters.search]);
+
+  const queryFilters = useMemo(
+    () => ({
+      ...filters,
+      search: debouncedSearch,
+    }),
+    [filters, debouncedSearch]
+  );
 
   const loadDomainOptions = async () => {
     setIsOptionsLoading(true);
@@ -175,11 +206,15 @@ export default function DomainManager() {
 
   useEffect(() => {
     let cancelled = false;
+    const includeTotal = pageAvailable === 1 || totalAvailableRef.current === 0;
     const query = buildInventoryQuery(
-      filters,
+      queryFilters,
       pageAvailable,
       rowsPerPage,
-      { status: "available" }
+      {
+        status: "available",
+        includeTotal: includeTotal ? "true" : "false",
+      }
     );
 
     setIsDomainsLoading(true);
@@ -192,7 +227,9 @@ export default function DomainManager() {
 
         if (cancelled) return;
         setDomains(data.items);
-        setTotalAvailable(data.total);
+        if (typeof data.total === "number") {
+          setTotalAvailable(data.total);
+        }
       })
       .catch((error) => {
         console.error("Failed to load domains", error);
@@ -207,11 +244,17 @@ export default function DomainManager() {
     return () => {
       cancelled = true;
     };
-  }, [filters, pageAvailable, rowsPerPage]);
+  }, [queryFilters, pageAvailable, rowsPerPage]);
 
   useEffect(() => {
     let cancelled = false;
-    const query = buildInventoryQuery(filters, pageHistory, rowsPerPage);
+    const includeTotal = pageHistory === 1 || totalHistoryRef.current === 0;
+    const query = buildInventoryQuery(
+      queryFilters,
+      pageHistory,
+      rowsPerPage,
+      { includeTotal: includeTotal ? "true" : "false" }
+    );
 
     setIsHistoryLoading(true);
 
@@ -223,7 +266,9 @@ export default function DomainManager() {
 
         if (cancelled) return;
         setHistory(data.items);
-        setTotalHistory(data.total);
+        if (typeof data.total === "number") {
+          setTotalHistory(data.total);
+        }
       })
       .catch((error) => {
         console.error("Failed to load domain history", error);
@@ -238,7 +283,7 @@ export default function DomainManager() {
     return () => {
       cancelled = true;
     };
-  }, [filters, pageHistory, rowsPerPage]);
+  }, [queryFilters, pageHistory, rowsPerPage]);
 
   useEffect(() => {
     setPageAvailable(1);
@@ -251,31 +296,84 @@ export default function DomainManager() {
     filters.country,
   ]);
 
-  const refreshInventoryData = async () => {
-    setIsDomainsLoading(true);
-    setIsHistoryLoading(true);
+  const refreshInventoryData = async ({
+    refreshDomains = true,
+    refreshHistory = true,
+    refreshOptions = false,
+    includeTotal = false,
+  }: {
+    refreshDomains?: boolean;
+    refreshHistory?: boolean;
+    refreshOptions?: boolean;
+    includeTotal?: boolean;
+  } = {}) => {
+    if (refreshDomains) {
+      suggestCacheRef.current.clear();
+    }
 
-    await Promise.all([
-      loadDomainOptions(),
-      fetch(`/api/domains?${buildInventoryQuery(filters, pageAvailable, rowsPerPage, { status: "available" })}`)
-        .then(async (res) => (res.ok
-          ? res.json() as Promise<PaginatedResponse<DomainItem>>
-          : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
-        .then((data) => {
-          setDomains(data.items);
-          setTotalAvailable(data.total);
-          setIsDomainsLoading(false);
-        }),
-      fetch(`/api/domain-history?${buildInventoryQuery(filters, pageHistory, rowsPerPage)}`)
-        .then(async (res) => (res.ok
-          ? res.json() as Promise<PaginatedResponse<DomainHistoryItem>>
-          : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
-        .then((data) => {
-          setHistory(data.items);
-          setTotalHistory(data.total);
-          setIsHistoryLoading(false);
-        }),
-    ]);
+    if (refreshDomains) setIsDomainsLoading(true);
+    if (refreshHistory) setIsHistoryLoading(true);
+
+    const jobs: Promise<void>[] = [];
+
+    if (refreshOptions) {
+      jobs.push(loadDomainOptions());
+    }
+
+    if (refreshDomains) {
+      jobs.push(
+        fetch(
+          `/api/domains?${buildInventoryQuery(
+            queryFilters,
+            pageAvailable,
+            rowsPerPage,
+            {
+              status: "available",
+              includeTotal: includeTotal ? "true" : "false",
+            }
+          )}`
+        )
+          .then(async (res) => (res.ok
+            ? res.json() as Promise<PaginatedResponse<DomainItem>>
+            : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
+          .then((data) => {
+            setDomains(data.items);
+            if (typeof data.total === "number") {
+              setTotalAvailable(data.total);
+            }
+          })
+          .finally(() => {
+            setIsDomainsLoading(false);
+          })
+      );
+    }
+
+    if (refreshHistory) {
+      jobs.push(
+        fetch(
+          `/api/domain-history?${buildInventoryQuery(
+            queryFilters,
+            pageHistory,
+            rowsPerPage,
+            { includeTotal: includeTotal ? "true" : "false" }
+          )}`
+        )
+          .then(async (res) => (res.ok
+            ? res.json() as Promise<PaginatedResponse<DomainHistoryItem>>
+            : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
+          .then((data) => {
+            setHistory(data.items);
+            if (typeof data.total === "number") {
+              setTotalHistory(data.total);
+            }
+          })
+          .finally(() => {
+            setIsHistoryLoading(false);
+          })
+      );
+    }
+
+    await Promise.all(jobs);
   };
 
 
@@ -324,86 +422,114 @@ export default function DomainManager() {
   // ================================
 
   const handleAddDomain = async () => {
-    const resolvedExpiry = normalizeExpiryInput(
-      expiry || expiryRef.current?.value || ""
-    );
-    const missingFields = [
-      !domain.trim() ? "Domain" : null,
-      !hosting.trim() ? "Hosting" : null,
-      !account.trim() ? "Account" : null,
-      !project.trim() ? "Project" : null,
-    ].filter(Boolean);
+    setIsAddingDomain(true);
+    try {
+      const resolvedExpiry = normalizeExpiryInput(
+        expiry || expiryRef.current?.value || ""
+      );
+      const missingFields = [
+        !domain.trim() ? "Domain" : null,
+        !hosting.trim() ? "Hosting" : null,
+        !account.trim() ? "Account" : null,
+        !project.trim() ? "Project" : null,
+      ].filter(Boolean);
 
-    if (missingFields.length > 0) {
-      alert(`Missing required fields: ${missingFields.join(", ")}`);
-      return;
+      if (missingFields.length > 0) {
+        alert(`Missing required fields: ${missingFields.join(", ")}`);
+        return;
+      }
+
+      if (resolvedExpiry && !isValidExpiryInput(resolvedExpiry)) {
+        alert("Expiry must be in YYYY-MM-DD or DD/MM/YYYY format.");
+        return;
+      }
+
+      const normalizedInput = normalizeDomain(domain);
+
+      const duplicateLookupRes = await fetch(
+        `/api/domains?${buildInventoryQuery({
+          search: "",
+          expiry: "all",
+          hostingProvider: null,
+          project: null,
+          country: null,
+        }, 1, 1, { exactDomain: normalizedInput })}`
+      );
+      const duplicateLookup: PaginatedResponse<DomainItem> = duplicateLookupRes.ok
+        ? await duplicateLookupRes.json()
+        : { items: [], total: 0, page: 1, pageSize: 1 };
+      const duplicate = duplicateLookup.items[0];
+
+      if (duplicate) {
+        setDuplicateDomain(duplicate);
+        return;
+      }
+
+      const newDomain: DomainItem = {
+        id: crypto.randomUUID(),
+        domain: normalizedInput,
+        hosting,
+        expiry: resolvedExpiry || null,
+        account,
+        project,
+        country: (capitalizeText(country.trim()) || "-"),
+        status: "available",
+      };
+
+      const res = await fetch("/api/domains", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newDomain),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? await res.json()
+        : { error: "Unexpected server response." };
+
+      if (!res.ok) {
+        alert(data.error || "Failed to create domain.");
+        return;
+      }
+
+      setHostingOptions((prev) =>
+        hosting && !prev.includes(hosting) ? [...prev, hosting].sort() : prev
+      );
+      setAccountOptions((prev) =>
+        account && !prev.includes(account) ? [...prev, account].sort() : prev
+      );
+      setProjectOptions((prev) =>
+        project && !prev.includes(project) ? [...prev, project].sort() : prev
+      );
+      if (country.trim()) {
+        const normalizedCountry = capitalizeText(country.trim());
+        setCountryOptions((prev) =>
+          !prev.includes(normalizedCountry)
+            ? [...prev, normalizedCountry].sort()
+            : prev
+        );
+      }
+
+      await refreshInventoryData({
+        refreshDomains: true,
+        refreshHistory: false,
+        refreshOptions: false,
+        includeTotal: false,
+      });
+
+      setDomain("");
+      setHosting("");
+      setProject("");
+      setCountry("");
+      setAccount("");
+      setExpiry("");
+
+      domainRef.current?.focus();
+    } finally {
+      setIsAddingDomain(false);
     }
-
-    if (resolvedExpiry && !isValidExpiryInput(resolvedExpiry)) {
-      alert("Expiry must be in YYYY-MM-DD or DD/MM/YYYY format.");
-      return;
-    }
-
-    const normalizedInput = normalizeDomain(domain);
-
-    const duplicateLookupRes = await fetch(
-      `/api/domains?${buildInventoryQuery({
-        search: "",
-        expiry: "all",
-        hostingProvider: null,
-        project: null,
-        country: null,
-      }, 1, 1, { exactDomain: normalizedInput })}`
-    );
-    const duplicateLookup: PaginatedResponse<DomainItem> = duplicateLookupRes.ok
-      ? await duplicateLookupRes.json()
-      : { items: [], total: 0, page: 1, pageSize: 1 };
-    const duplicate = duplicateLookup.items[0];
-
-    if (duplicate) {
-      setDuplicateDomain(duplicate);
-      return;
-    }
-
-    const newDomain: DomainItem = {
-      id: crypto.randomUUID(),
-      domain: normalizedInput,
-      hosting,
-      expiry: resolvedExpiry || null,
-      account,
-      project,
-      country: (capitalizeText(country.trim()) || "-"),
-      status: "available",
-    };
-
-    const res = await fetch("/api/domains", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(newDomain),
-    });
-
-    const contentType = res.headers.get("content-type") || "";
-    const data = contentType.includes("application/json")
-      ? await res.json()
-      : { error: "Unexpected server response." };
-
-    if (!res.ok) {
-      alert(data.error || "Failed to create domain.");
-      return;
-    }
-
-    await refreshInventoryData();
-
-    setDomain("");
-    setHosting("");
-    setProject("");
-    setCountry("");
-    setAccount("");
-    setExpiry("");
-
-    domainRef.current?.focus();
   };
 
 
@@ -448,82 +574,105 @@ export default function DomainManager() {
 
 
   const handleUseDomain = async (id: string) => {
-    const projectValue = searchProject.trim();
-    const requestCountry = capitalizeText(searchCountry.trim());
+    setIsUsingDomain(true);
+    try {
+      const projectValue = searchProject.trim();
+      const requestCountry = capitalizeText(searchCountry.trim());
 
-    if (!projectValue) {
-      setRequestError("Project name is required.");
-      return;
+      if (!projectValue) {
+        setRequestError("Project name is required.");
+        return;
+      }
+
+      if (!requestCountry) {
+        setRequestError("Country is required before you can use a domain.");
+        return;
+      }
+
+      const res = await fetch("/api/domains/use", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id,
+          project: projectValue,
+          country: requestCountry,
+        }),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? await res.json()
+        : { error: "Unexpected server response." };
+
+      if (!res.ok) {
+        setRequestError(data.error || "Failed to use domain.");
+        return;
+      }
+
+      setRequestError("");
+      setSearchCountry(requestCountry);
+      setMatchedDomains([]);
+      setCurrentIndex(0);
+      setProviderWarning("");
+      setTotalAvailable((prev) => Math.max(prev - 1, 0));
+      setTotalHistory((prev) => prev + 1);
+      await refreshInventoryData({
+        refreshDomains: true,
+        refreshHistory: true,
+        refreshOptions: false,
+        includeTotal: false,
+      });
+    } finally {
+      setIsUsingDomain(false);
     }
-
-    if (!requestCountry) {
-      setRequestError("Country is required before you can use a domain.");
-      return;
-    }
-
-    const res = await fetch("/api/domains/use", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        id,
-        project: projectValue,
-        country: requestCountry,
-      }),
-    });
-
-    const contentType = res.headers.get("content-type") || "";
-    const data = contentType.includes("application/json")
-      ? await res.json()
-      : { error: "Unexpected server response." };
-
-    if (!res.ok) {
-      setRequestError(data.error || "Failed to use domain.");
-      return;
-    }
-
-    setRequestError("");
-    setSearchCountry(requestCountry);
-    setMatchedDomains([]);
-    setCurrentIndex(0);
-    setProviderWarning("");
-    await refreshInventoryData();
   };
 
   const handleSuggestDomain = async () => {
-    const projectKey = searchProject.trim().toLowerCase();
-    const countryKey = searchCountry.trim().toLowerCase();
+    setIsSuggestingDomain(true);
+    try {
+      const projectKey = searchProject.trim().toLowerCase();
+      const countryKey = searchCountry.trim().toLowerCase();
 
-    if (!projectKey) {
-      setRequestError("Project name is required.");
-      return;
-    }
+      if (!projectKey) {
+        setRequestError("Project name is required.");
+        return;
+      }
 
-    if (!countryKey) {
-      setRequestError("Country is required to request a domain.");
-      return;
-    }
+      if (!countryKey) {
+        setRequestError("Country is required to request a domain.");
+        return;
+      }
 
-    setRequestError("");
+      setRequestError("");
 
-    const params = new URLSearchParams({
-      project: searchProject.trim(),
-      country: searchCountry.trim(),
-      strictCountry: String(strictCountry),
-    });
-    const res = await fetch(`/api/domains/suggest?${params.toString()}`);
-    const matches: DomainItem[] = res.ok ? await res.json() : [];
+      const cacheKey = `${projectKey}|${countryKey}|${strictCountry ? "1" : "0"}`;
+      let matches = suggestCacheRef.current.get(cacheKey);
 
-    if (matches.length === 0) {
-      alert("No available domain found for this project");
-      setMatchedDomains([]);
+      if (!matches) {
+        const params = new URLSearchParams({
+          project: searchProject.trim(),
+          country: searchCountry.trim(),
+          strictCountry: String(strictCountry),
+        });
+        const res = await fetch(`/api/domains/suggest?${params.toString()}`);
+        matches = res.ok ? (await res.json() as DomainItem[]) : [];
+        suggestCacheRef.current.set(cacheKey, matches);
+      }
+
+      if (matches.length === 0) {
+        alert("No available domain found for this project");
+        setMatchedDomains([]);
+        setCurrentIndex(0);
+        return;
+      }
+
+      setMatchedDomains(matches);
       setCurrentIndex(0);
-      return;
+    } finally {
+      setIsSuggestingDomain(false);
     }
-
-    setMatchedDomains(matches);
-    setCurrentIndex(0);
   };
 
 
@@ -545,7 +694,11 @@ export default function DomainManager() {
       return;
     }
 
-    await refreshInventoryData();
+    await refreshInventoryData({
+      refreshDomains: true,
+      refreshHistory: true,
+      includeTotal: true,
+    });
     setHistoryActionId(null);
   };
 
@@ -567,7 +720,11 @@ export default function DomainManager() {
       return;
     }
 
-    await refreshInventoryData();
+    await refreshInventoryData({
+      refreshDomains: false,
+      refreshHistory: true,
+      includeTotal: true,
+    });
     setHistoryActionId(null);
   };
 
@@ -606,7 +763,11 @@ export default function DomainManager() {
     setEditingId(null);
     setEditDomain(null);
 
-    await refreshInventoryData();
+    await refreshInventoryData({
+      refreshDomains: true,
+      refreshHistory: false,
+      includeTotal: true,
+    });
   };
   
   
@@ -699,9 +860,9 @@ export default function DomainManager() {
         <div className="mt-6 flex justify-end">
           <Button
             onClick={handleAddDomain}
-            disabled={isDomainsLoading || isHistoryLoading || isOptionsLoading}
+            disabled={isAddingDomain || isOptionsLoading}
           >
-            {isDomainsLoading || isHistoryLoading ? "Loading..." : "Add domain"}
+            {isAddingDomain ? "Adding..." : "Add domain"}
           </Button>
         </div>
       </Card>
@@ -742,9 +903,9 @@ export default function DomainManager() {
         <Button
           variant="secondary"
           onClick={() => void handleSuggestDomain()}
-          disabled={isDomainsLoading || isOptionsLoading}
+          disabled={isSuggestingDomain}
         >
-          {isDomainsLoading ? "Loading..." : "Suggest domain"}
+          {isSuggestingDomain ? "Finding..." : "Suggest domain"}
         </Button>
       </div>
 
@@ -821,8 +982,9 @@ export default function DomainManager() {
                 onClick={() =>
                   handleUseDomain(matchedDomains[currentIndex].id)
                 }
+                disabled={isUsingDomain}
               >
-                Use
+                {isUsingDomain ? "Using..." : "Use"}
               </Button>
             </div>
           </div>

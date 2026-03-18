@@ -20,6 +20,12 @@ model Domain {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   status         DomainStatus
+
+  @@index([status, createdAt])
+  @@index([project])
+  @@index([country])
+  @@index([hosting])
+  @@index([expiry])
 }
 
 model DomainHistory {
@@ -34,6 +40,10 @@ model DomainHistory {
 
   @@index([domainId])
   @@index([createdAt])
+  @@index([project])
+  @@index([country])
+  @@index([hosting])
+  @@index([expiry])
 }
 
 enum DomainStatus {
