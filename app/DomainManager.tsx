@@ -13,12 +13,13 @@ import { FilterBar } from "@/components/filters/FilterBar";
 
 // Utilities
 import { normalizeDomain } from "@/lib/domain/domainUtils";
-import { applyFilters } from "@/lib/domain/domainUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
 import type {
   DomainFilters,
+  DomainOptionSets,
   DomainHistoryItem,
   DomainItem,
+  PaginatedResponse,
 } from "@/lib/domain/domainTypes";
 
 // React
@@ -34,6 +35,34 @@ type Option = {
   label: string;
   value: string;
 };
+
+const DEFAULT_ROWS_PER_PAGE = 10;
+
+function buildInventoryQuery(
+  filters: DomainFilters,
+  page: number,
+  pageSize: number,
+  extraParams?: Record<string, string>
+) {
+  const searchParams = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+
+  if (filters.search.trim()) searchParams.set("search", filters.search.trim());
+  if (filters.expiry !== "all") searchParams.set("expiry", filters.expiry);
+  if (filters.hostingProvider) searchParams.set("hostingProvider", filters.hostingProvider);
+  if (filters.project) searchParams.set("project", filters.project);
+  if (filters.country) searchParams.set("country", filters.country);
+
+  if (extraParams) {
+    Object.entries(extraParams).forEach(([key, value]) => {
+      if (value) searchParams.set(key, value);
+    });
+  }
+
+  return searchParams.toString();
+}
 
 // ================================
 // Component
@@ -106,68 +135,155 @@ export default function DomainManager() {
   // pagination state
   const [pageAvailable, setPageAvailable] = useState(1);
   const [pageHistory, setPageHistory] = useState(1);
+  const [totalAvailable, setTotalAvailable] = useState(0);
+  const [totalHistory, setTotalHistory] = useState(0);
   const [historyActionId, setHistoryActionId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isDomainsLoading, setIsDomainsLoading] = useState(true);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [isOptionsLoading, setIsOptionsLoading] = useState(true);
 
-  const rowsPerPage = 10;
+  const rowsPerPage = DEFAULT_ROWS_PER_PAGE;
 
-  const loadInventoryData = async () => {
-    setIsLoading(true);
+  const loadDomainOptions = async () => {
+    setIsOptionsLoading(true);
 
     try {
-      const [domainsRes, historyRes] = await Promise.all([
-        fetch("/api/domains"),
-        fetch("/api/domain-history"),
-      ]);
+      const res = await fetch("/api/domain-options");
+      const data: DomainOptionSets = res.ok
+        ? await res.json()
+        : { hosting: [], account: [], project: [], country: [] };
 
-      const domainsData = domainsRes.ok ? await domainsRes.json() : [];
-      const historyData = historyRes.ok ? await historyRes.json() : [];
-
-      setDomains(domainsData);
-      setHistory(historyData);
+      setHostingOptions(data.hosting);
+      setAccountOptions(data.account);
+      setProjectOptions(data.project);
+      setCountryOptions(data.country);
     } finally {
-      setIsLoading(false);
+      setIsOptionsLoading(false);
     }
   };
 
   useEffect(() => {
-    let cancelled = false;
-
-    void loadInventoryData().catch((error) => {
-      console.error("Failed to load inventory data", error);
-      if (cancelled) return;
-      setDomains([]);
-      setHistory([]);
-      setIsLoading(false);
+    void loadDomainOptions().catch((error) => {
+      console.error("Failed to load domain options", error);
+      setHostingOptions([]);
+      setAccountOptions([]);
+      setProjectOptions([]);
+      setCountryOptions([]);
+      setIsOptionsLoading(false);
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const query = buildInventoryQuery(
+      filters,
+      pageAvailable,
+      rowsPerPage,
+      { status: "available" }
+    );
+
+    setIsDomainsLoading(true);
+
+    void fetch(`/api/domains?${query}`)
+      .then(async (res) => {
+        const data: PaginatedResponse<DomainItem> = res.ok
+          ? await res.json()
+          : { items: [], total: 0, page: 1, pageSize: rowsPerPage };
+
+        if (cancelled) return;
+        setDomains(data.items);
+        setTotalAvailable(data.total);
+      })
+      .catch((error) => {
+        console.error("Failed to load domains", error);
+        if (cancelled) return;
+        setDomains([]);
+        setTotalAvailable(0);
+      })
+      .finally(() => {
+        if (!cancelled) setIsDomainsLoading(false);
+      });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [filters, pageAvailable, rowsPerPage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const query = buildInventoryQuery(filters, pageHistory, rowsPerPage);
+
+    setIsHistoryLoading(true);
+
+    void fetch(`/api/domain-history?${query}`)
+      .then(async (res) => {
+        const data: PaginatedResponse<DomainHistoryItem> = res.ok
+          ? await res.json()
+          : { items: [], total: 0, page: 1, pageSize: rowsPerPage };
+
+        if (cancelled) return;
+        setHistory(data.items);
+        setTotalHistory(data.total);
+      })
+      .catch((error) => {
+        console.error("Failed to load domain history", error);
+        if (cancelled) return;
+        setHistory([]);
+        setTotalHistory(0);
+      })
+      .finally(() => {
+        if (!cancelled) setIsHistoryLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filters, pageHistory, rowsPerPage]);
+
+  useEffect(() => {
+    setPageAvailable(1);
+    setPageHistory(1);
+  }, [
+    filters.search,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+  ]);
+
+  const refreshInventoryData = async () => {
+    setIsDomainsLoading(true);
+    setIsHistoryLoading(true);
+
+    await Promise.all([
+      loadDomainOptions(),
+      fetch(`/api/domains?${buildInventoryQuery(filters, pageAvailable, rowsPerPage, { status: "available" })}`)
+        .then(async (res) => (res.ok
+          ? res.json() as Promise<PaginatedResponse<DomainItem>>
+          : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
+        .then((data) => {
+          setDomains(data.items);
+          setTotalAvailable(data.total);
+          setIsDomainsLoading(false);
+        }),
+      fetch(`/api/domain-history?${buildInventoryQuery(filters, pageHistory, rowsPerPage)}`)
+        .then(async (res) => (res.ok
+          ? res.json() as Promise<PaginatedResponse<DomainHistoryItem>>
+          : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
+        .then((data) => {
+          setHistory(data.items);
+          setTotalHistory(data.total);
+          setIsHistoryLoading(false);
+        }),
+    ]);
+  };
 
 
   // ================================
   // Derived Data
   // ================================
-
-  const availableDomains = domains.filter(d => d.status === "available");
-
-  const filteredAvailable = applyFilters(availableDomains, filters);
-  const filteredHistory = applyFilters(history, filters);
-
-  const totalPagesAvailable = Math.ceil(filteredAvailable.length / rowsPerPage);
-  const totalPagesHistory = Math.ceil(filteredHistory.length / rowsPerPage);
-
-  const paginatedAvailable = filteredAvailable.slice(
-    (pageAvailable - 1) * rowsPerPage,
-    pageAvailable * rowsPerPage
-  );
-
-  const paginatedHistory = filteredHistory.slice(
-    (pageHistory - 1) * rowsPerPage,
-    pageHistory * rowsPerPage
-  );
+  const totalPagesAvailable = Math.max(1, Math.ceil(totalAvailable / rowsPerPage));
+  const totalPagesHistory = Math.max(1, Math.ceil(totalHistory / rowsPerPage));
 
 
   // ================================
@@ -230,9 +346,19 @@ export default function DomainManager() {
 
     const normalizedInput = normalizeDomain(domain);
 
-    const duplicate = domains.find(
-      d => normalizeDomain(d.domain) === normalizedInput
+    const duplicateLookupRes = await fetch(
+      `/api/domains?${buildInventoryQuery({
+        search: "",
+        expiry: "all",
+        hostingProvider: null,
+        project: null,
+        country: null,
+      }, 1, 1, { exactDomain: normalizedInput })}`
     );
+    const duplicateLookup: PaginatedResponse<DomainItem> = duplicateLookupRes.ok
+      ? await duplicateLookupRes.json()
+      : { items: [], total: 0, page: 1, pageSize: 1 };
+    const duplicate = duplicateLookup.items[0];
 
     if (duplicate) {
       setDuplicateDomain(duplicate);
@@ -268,7 +394,7 @@ export default function DomainManager() {
       return;
     }
 
-    await loadInventoryData();
+    await refreshInventoryData();
 
     setDomain("");
     setHosting("");
@@ -297,11 +423,16 @@ export default function DomainManager() {
       method: "DELETE"
     });
 
-    await loadInventoryData();
+    await refreshInventoryData();
   };
 
   const handleGoToDuplicate = () => {
     if (!duplicateDomain) return; 
+    setFilters((current) => ({
+      ...current,
+      search: duplicateDomain.domain,
+    }));
+    setPageAvailable(1);
     setHighlightDomainId(duplicateDomain.id); 
     setTimeout(() => { 
       const el = document.getElementById(`domain-${duplicateDomain.id}`);
@@ -357,10 +488,10 @@ export default function DomainManager() {
     setMatchedDomains([]);
     setCurrentIndex(0);
     setProviderWarning("");
-    await loadInventoryData();
+    await refreshInventoryData();
   };
 
-  const handleSuggestDomain = () => {
+  const handleSuggestDomain = async () => {
     const projectKey = searchProject.trim().toLowerCase();
     const countryKey = searchCountry.trim().toLowerCase();
 
@@ -376,26 +507,13 @@ export default function DomainManager() {
 
     setRequestError("");
 
-    const matches = domains.filter((d) => {
-      if (d.status !== "available") return false;
-
-      const dProject = d.project.trim().toLowerCase();
-      const projectMatch = dProject.includes(projectKey);
-
-      if (!projectMatch) return false;
-
-      if (!countryKey) return true;
-
-      const dCountry = (d.country || "").trim().toLowerCase();
-      const domainHasNoCountry =
-        dCountry === "" || dCountry === "-" || dCountry === "—";
-
-      if (strictCountry) {
-        return dCountry === countryKey;
-      }
-
-      return dCountry === countryKey || domainHasNoCountry;
+    const params = new URLSearchParams({
+      project: searchProject.trim(),
+      country: searchCountry.trim(),
+      strictCountry: String(strictCountry),
     });
+    const res = await fetch(`/api/domains/suggest?${params.toString()}`);
+    const matches: DomainItem[] = res.ok ? await res.json() : [];
 
     if (matches.length === 0) {
       alert("No available domain found for this project");
@@ -427,7 +545,7 @@ export default function DomainManager() {
       return;
     }
 
-    await loadInventoryData();
+    await refreshInventoryData();
     setHistoryActionId(null);
   };
 
@@ -449,7 +567,7 @@ export default function DomainManager() {
       return;
     }
 
-    await loadInventoryData();
+    await refreshInventoryData();
     setHistoryActionId(null);
   };
 
@@ -488,7 +606,7 @@ export default function DomainManager() {
     setEditingId(null);
     setEditDomain(null);
 
-    await loadInventoryData();
+    await refreshInventoryData();
   };
   
   
@@ -579,8 +697,11 @@ export default function DomainManager() {
         )}
 
         <div className="mt-6 flex justify-end">
-          <Button onClick={handleAddDomain} disabled={isLoading}>
-            {isLoading ? "Loading..." : "Add domain"}
+          <Button
+            onClick={handleAddDomain}
+            disabled={isDomainsLoading || isHistoryLoading || isOptionsLoading}
+          >
+            {isDomainsLoading || isHistoryLoading ? "Loading..." : "Add domain"}
           </Button>
         </div>
       </Card>
@@ -620,10 +741,10 @@ export default function DomainManager() {
       <div className="mt-4 flex justify-end">
         <Button
           variant="secondary"
-          onClick={handleSuggestDomain}
-          disabled={isLoading}
+          onClick={() => void handleSuggestDomain()}
+          disabled={isDomainsLoading || isOptionsLoading}
         >
-          {isLoading ? "Loading..." : "Suggest domain"}
+          {isDomainsLoading ? "Loading..." : "Suggest domain"}
         </Button>
       </div>
 
@@ -639,17 +760,38 @@ export default function DomainManager() {
 
       {/* Suggested result */}
       {matchedDomains.length > 0 && (
-        <div className="mt-6 p-4 border border-zinc-800 rounded-lg">
-          <p className="text-sm text-zinc-400 mb-2">
+        <div className="mt-6 rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+          <p className="mb-3 text-sm font-medium tracking-wide text-zinc-400">
             Suggested domain
           </p>
 
           <div className="flex items-center justify-between">
-            <div>
-              <p className="font-medium">
+            <div className="space-y-3">
+              <p className="text-3xl font-semibold tracking-tight text-zinc-50">
                 {matchedDomains[currentIndex].domain}
               </p>
-              <p className="text-xs text-zinc-400">
+
+              <div className="space-y-2 text-sm text-zinc-300">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
+                    Hosting
+                  </span>
+                  <span className="text-sm text-zinc-200">
+                    {matchedDomains[currentIndex].hosting || "-"}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-sky-300">
+                    Account
+                  </span>
+                  <span className="text-sm text-zinc-200">
+                    {matchedDomains[currentIndex].account || "-"}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-xs font-medium tracking-wide text-zinc-500">
                 {currentIndex + 1} / {matchedDomains.length}
               </p>
             </div>
@@ -689,7 +831,9 @@ export default function DomainManager() {
     </Card>
 
       <FilterBar
-        domains={domains}
+        hostingOptions={hostingOptions}
+        projectOptions={projectOptions}
+        countryOptions={countryOptions}
         filters={filters}
         setSearch={setSearch}
         setExpiry={setExpiryFilter}
@@ -702,12 +846,12 @@ export default function DomainManager() {
       {/* Tables */}
 
       <DomainTable
-        domains={paginatedAvailable}
+        domains={domains}
         page={pageAvailable}
         totalPages={totalPagesAvailable}
-        totalItems={filteredAvailable.length}
+        totalItems={totalAvailable}
         rowsPerPage={rowsPerPage}
-        isLoading={isLoading}
+        isLoading={isDomainsLoading}
         onPrev={() => setPageAvailable(p => Math.max(p - 1, 1))}
         onNext={() => setPageAvailable(p => Math.min(p + 1, totalPagesAvailable))}
         editingId={editingId}
@@ -731,12 +875,12 @@ export default function DomainManager() {
       />
 
       <HistoryTable
-        histories={paginatedHistory}
+        histories={history}
         page={pageHistory}
         totalPages={totalPagesHistory}
-        totalItems={filteredHistory.length}
+        totalItems={totalHistory}
         rowsPerPage={rowsPerPage}
-        isLoading={isLoading}
+        isLoading={isHistoryLoading}
         onPrev={() => setPageHistory(p => Math.max(p - 1, 1))}
         onNext={() => setPageHistory(p => Math.min(p + 1, totalPagesHistory))}
         historyActionId={historyActionId}

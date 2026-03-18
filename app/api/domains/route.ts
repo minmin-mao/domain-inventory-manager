@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeDomain } from "@/lib/domain/domainUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 const normalizeText = (value: unknown) =>
@@ -19,13 +20,105 @@ const parseExpiry = (value: unknown) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-// GET all domains
-export async function GET() {
-  const domains = await prisma.domain.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+const parsePositiveInt = (value: string | null, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
 
-  return NextResponse.json(domains);
+const getExpiryWhere = (expiry: string | null) => {
+  const now = new Date();
+
+  switch (expiry) {
+    case "expired":
+      return { lt: now };
+    case "le30": {
+      const upperBound = new Date(now);
+      upperBound.setDate(upperBound.getDate() + 30);
+      return { gte: now, lte: upperBound };
+    }
+    case "le60": {
+      const upperBound = new Date(now);
+      upperBound.setDate(upperBound.getDate() + 60);
+      return { gte: now, lte: upperBound };
+    }
+    default:
+      return undefined;
+  }
+};
+
+const buildWhere = (searchParams: URLSearchParams): Prisma.DomainWhereInput => {
+  const search = searchParams.get("search")?.trim();
+  const hosting = searchParams.get("hostingProvider");
+  const project = searchParams.get("project");
+  const country = searchParams.get("country");
+  const status = searchParams.get("status");
+  const exactDomain = searchParams.get("exactDomain")?.trim();
+  const expiry = searchParams.get("expiry");
+
+  return {
+    ...(status ? { status: status as "available" | "taken" } : {}),
+    ...(exactDomain ? { domain: normalizeDomain(exactDomain) } : {}),
+    ...(search
+      ? {
+          OR: [
+            { domain: { contains: search, mode: "insensitive" } },
+            { project: { contains: search, mode: "insensitive" } },
+            { hosting: { contains: search, mode: "insensitive" } },
+            { country: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    ...(hosting ? { hosting } : {}),
+    ...(project ? { project } : {}),
+    ...(country ? { country } : {}),
+    ...(getExpiryWhere(expiry) ? { expiry: getExpiryWhere(expiry) } : {}),
+  };
+};
+
+// GET all domains
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const hasPagingParams =
+    searchParams.has("page") ||
+    searchParams.has("pageSize") ||
+    searchParams.has("search") ||
+    searchParams.has("hostingProvider") ||
+    searchParams.has("project") ||
+    searchParams.has("country") ||
+    searchParams.has("expiry") ||
+    searchParams.has("status") ||
+    searchParams.has("exactDomain");
+  const where = buildWhere(searchParams);
+
+  if (!hasPagingParams) {
+    const domains = await prisma.domain.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+    });
+
+    return NextResponse.json(domains);
+  }
+
+  const page = parsePositiveInt(searchParams.get("page"), 1);
+  const pageSize = parsePositiveInt(searchParams.get("pageSize"), 10);
+  const skip = (page - 1) * pageSize;
+
+  const [items, total] = await Promise.all([
+    prisma.domain.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip,
+      take: pageSize,
+    }),
+    prisma.domain.count({ where }),
+  ]);
+
+  return NextResponse.json({
+    items,
+    total,
+    page,
+    pageSize,
+  });
 }
 
 // CREATE new domain

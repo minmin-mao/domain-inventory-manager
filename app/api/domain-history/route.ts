@@ -2,9 +2,44 @@ import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
 const UNDO_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+const DEFAULT_PAGE_SIZE = 10;
 
-export async function GET() {
+const parsePositiveInt = (value: string | null, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+
+const matchesExpiryFilter = (expiry: Date | null, filter: string | null) => {
+  if (!filter || filter === "all") return true;
+  if (!expiry) return false;
+
+  const now = Date.now();
+  const diffDays = Math.ceil((expiry.getTime() - now) / (1000 * 60 * 60 * 24));
+  const isExpired = expiry.getTime() < now;
+
+  switch (filter) {
+    case "expired":
+      return isExpired;
+    case "le30":
+      return !isExpired && diffDays <= 30;
+    case "le60":
+      return !isExpired && diffDays <= 60;
+    default:
+      return true;
+  }
+};
+
+export async function GET(req: Request) {
   try {
+    const { searchParams } = new URL(req.url);
+    const page = parsePositiveInt(searchParams.get("page"), 1);
+    const pageSize = parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
+    const search = searchParams.get("search")?.trim().toLowerCase() ?? "";
+    const hosting = searchParams.get("hostingProvider");
+    const project = searchParams.get("project");
+    const country = searchParams.get("country");
+    const expiryFilter = searchParams.get("expiry");
+
     const historyDelegate = (prisma as typeof prisma & {
       domainHistory?: {
         findMany: (args: { orderBy: { createdAt: "desc" } }) => Promise<
@@ -60,10 +95,49 @@ export async function GET() {
       (a, b) =>
         new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
+    const filtered = payload.filter((item) => {
+      if (search) {
+        const haystack = [
+          item.domain,
+          item.project,
+          item.hosting,
+          item.country,
+        ].join(" ").toLowerCase();
 
-    return NextResponse.json(payload);
+        if (!haystack.includes(search)) return false;
+      }
+
+      if (hosting && item.hosting !== hosting) return false;
+      if (project && item.project !== project) return false;
+      if (country && item.country !== country) return false;
+      if (!matchesExpiryFilter(item.expiry, expiryFilter)) return false;
+
+      return true;
+    });
+
+    if (!searchParams.has("page") && !searchParams.has("pageSize")) {
+      return NextResponse.json(filtered);
+    }
+
+    const start = (page - 1) * pageSize;
+    const items = filtered.slice(start, start + pageSize);
+
+    return NextResponse.json({
+      items,
+      total: filtered.length,
+      page,
+      pageSize,
+    });
   } catch (error) {
     console.error("Failed to load domain history", error);
-    return NextResponse.json([], { status: 200 });
+    return NextResponse.json(
+      {
+        items: [],
+        total: 0,
+        page: 1,
+        pageSize: DEFAULT_PAGE_SIZE,
+      },
+      { status: 200 }
+    );
   }
 }

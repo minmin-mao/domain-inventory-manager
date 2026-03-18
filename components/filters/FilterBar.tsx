@@ -2,33 +2,31 @@ import React from 'react';
 import { SearchInput } from './SearchInput';
 import { ExpiryFilter } from './ExpiryFilters';
 import { DropdownFilter } from './DropdownFilter';
-import { DomainItem } from '../../lib/domain/domainTypes';
+import type { DomainFilters } from '../../lib/domain/domainTypes';
 
 type Props = {
-  domains: DomainItem[]; // used to build option lists (unique providers/projects/countries)
-
-  filters: {
-  search: string;
-  expiry: 'all' | 'le30' | 'le60' | 'expired';
-  hostingProvider: string | null;
-  project: string | null;
-  country: string | null;
-};
-setSearch: (v: string) => void
-setExpiry: (v: 'all' | 'le30' | 'le60' | 'expired') => void;
-setHostingProvider: (v: string | null) => void;
-setProject: (v: string | null) => void;
-setCountry: (v: string | null) => void;
+  hostingOptions: string[];
+  projectOptions: string[];
+  countryOptions: string[];
+  filters: DomainFilters;
+  setSearch: (v: string) => void
+  setExpiry: (v: 'all' | 'le30' | 'le60' | 'expired') => void;
+  setHostingProvider: (v: string | null) => void;
+  setProject: (v: string | null) => void;
+  setCountry: (v: string | null) => void;
 }
 
-function uniqueOptions(values: (string | null | undefined)[]) {
-  return Array.from(new Set(values.filter(Boolean))).sort() as string[];
-}
-
-export function FilterBar({ domains, filters, setSearch, setExpiry, setHostingProvider, setProject, setCountry }: Props) {
-  const providers = uniqueOptions(domains.map((d) => d.hosting));
-  const projects = uniqueOptions(domains.map((d) => d.project));
-  const countries = uniqueOptions(domains.map((d) => d.country));
+export function FilterBar({
+  hostingOptions,
+  projectOptions,
+  countryOptions,
+  filters,
+  setSearch,
+  setExpiry,
+  setHostingProvider,
+  setProject,
+  setCountry,
+}: Props) {
 
   return (
     <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/40 p-4">
@@ -52,7 +50,7 @@ export function FilterBar({ domains, filters, setSearch, setExpiry, setHostingPr
           <DropdownFilter
             value={filters.hostingProvider}
             onChange={setHostingProvider}
-            options={providers}
+            options={hostingOptions}
             placeholder="All providers"
           />
         </div>
@@ -63,7 +61,7 @@ export function FilterBar({ domains, filters, setSearch, setExpiry, setHostingPr
           <DropdownFilter
             value={filters.project}
             onChange={setProject}
-            options={projects}
+            options={projectOptions}
             placeholder="All projects"
           />
         </div>
@@ -74,7 +72,7 @@ export function FilterBar({ domains, filters, setSearch, setExpiry, setHostingPr
           <DropdownFilter
             value={filters.country}
             onChange={setCountry}
-            options={countries}
+            options={countryOptions}
             placeholder="All countries"
           />
         </div>

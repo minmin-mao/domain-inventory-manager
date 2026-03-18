@@ -135,10 +135,11 @@ export default function DomainTable(props: Props) {
             )}
           </tbody>
         </table>
-          <div className="border-t border-zinc-800 px-4 py-3 flex items-center justify-between text-sm text-zinc-400">
+        <div className="border-t border-zinc-800 px-4 py-3 flex items-center justify-between text-sm text-zinc-400">
           <span>
-            Showing {(page - 1) * rowsPerPage + 1}–
-            {Math.min(page * rowsPerPage, totalItems)} of {totalItems}
+            {totalItems === 0
+              ? "Showing 0 of 0"
+              : `Showing ${(page - 1) * rowsPerPage + 1}–${Math.min(page * rowsPerPage, totalItems)} of ${totalItems}`}
           </span>
 
           <div className="flex items-center gap-2">

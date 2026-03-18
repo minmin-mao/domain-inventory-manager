@@ -44,3 +44,17 @@ export type DomainFilters = {
   project: string | null;
   country: string | null;
 }
+
+export type PaginatedResponse<T> = {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+};
+
+export type DomainOptionSets = {
+  hosting: string[];
+  account: string[];
+  project: string[];
+  country: string[];
+};
