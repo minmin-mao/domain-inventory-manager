@@ -23,36 +23,85 @@ export async function GET(req: Request) {
     );
   }
 
-  const matches = await prisma.domain.findMany({
-    where: {
-      status: "available",
-      project: {
-        contains: project,
-        mode: "insensitive",
+  const [matches, lastUsed] = await Promise.all([
+    prisma.domain.findMany({
+      where: {
+        status: "available",
+        project: {
+          contains: project,
+          mode: "insensitive",
+        },
+        ...(strictCountry
+          ? {
+              country: {
+                equals: country,
+                mode: "insensitive",
+              },
+            }
+          : {
+              OR: [
+                {
+                  country: {
+                    equals: country,
+                    mode: "insensitive",
+                  },
+                },
+                ...EMPTY_COUNTRY_VALUES.map((value) => ({
+                  country: value,
+                })),
+              ],
+            }),
       },
-      ...(strictCountry
-        ? {
-            country: {
-              equals: country,
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.domain.findFirst({
+      where: {
+        status: "taken",
+        OR: [
+          {
+            usedForProject: {
+              equals: project,
               mode: "insensitive",
             },
-          }
-        : {
+          },
+          {
+            project: {
+              equals: project,
+              mode: "insensitive",
+            },
+          },
+        ],
+        AND: [
+          {
             OR: [
+              {
+                usedForCountry: {
+                  equals: country,
+                  mode: "insensitive",
+                },
+              },
               {
                 country: {
                   equals: country,
                   mode: "insensitive",
                 },
               },
-              ...EMPTY_COUNTRY_VALUES.map((value) => ({
-                country: value,
-              })),
             ],
-          }),
-    },
-    orderBy: { createdAt: "desc" },
-  });
+          },
+        ],
+      },
+      orderBy: [
+        { usedAt: "desc" },
+        { createdAt: "desc" },
+      ],
+      select: {
+        hosting: true,
+      },
+    }),
+  ]);
 
-  return NextResponse.json(matches);
+  return NextResponse.json({
+    matches,
+    lastProvider: lastUsed?.hosting ?? null,
+  });
 }

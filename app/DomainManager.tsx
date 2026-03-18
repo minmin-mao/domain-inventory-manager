@@ -396,6 +396,49 @@ export default function DomainManager() {
     ref.current?.focus();
   };
 
+  const updateProviderWarning = (
+    nextIndex: number,
+    nextMatches: DomainItem[],
+    provider: string | null
+  ) => {
+    if (!provider || nextMatches.length === 0) {
+      setProviderWarning("");
+      return;
+    }
+
+    const currentDomain = nextMatches[nextIndex];
+    if (!currentDomain) {
+      setProviderWarning("");
+      return;
+    }
+
+    const isSameProvider =
+      currentDomain.hosting.trim().toLowerCase() ===
+      provider.trim().toLowerCase();
+
+    setProviderWarning(
+      isSameProvider
+        ? `Warning: suggested domain uses the same provider as last used (${provider}) for this project and country.`
+        : ""
+    );
+  };
+
+  const handlePrevDomain = () => {
+    setCurrentIndex((prev) => {
+      const nextIndex = Math.max(prev - 1, 0);
+      updateProviderWarning(nextIndex, matchedDomains, lastProvider);
+      return nextIndex;
+    });
+  };
+
+  const handleNextDomain = () => {
+    setCurrentIndex((prev) => {
+      const nextIndex = Math.min(prev + 1, matchedDomains.length - 1);
+      updateProviderWarning(nextIndex, matchedDomains, lastProvider);
+      return nextIndex;
+    });
+  };
+
 
   // ================================
   // Filter Setters
@@ -649,6 +692,7 @@ export default function DomainManager() {
 
       const cacheKey = `${projectKey}|${countryKey}|${strictCountry ? "1" : "0"}`;
       let matches = suggestCacheRef.current.get(cacheKey);
+      let latestLastProvider: string | null = null;
 
       if (!matches) {
         const params = new URLSearchParams({
@@ -657,19 +701,49 @@ export default function DomainManager() {
           strictCountry: String(strictCountry),
         });
         const res = await fetch(`/api/domains/suggest?${params.toString()}`);
-        matches = res.ok ? (await res.json() as DomainItem[]) : [];
+        const payload = res.ok
+          ? await res.json() as { matches?: DomainItem[]; lastProvider?: string | null } | DomainItem[]
+          : [];
+        if (Array.isArray(payload)) {
+          matches = payload;
+          latestLastProvider = null;
+        } else {
+          matches = payload.matches ?? [];
+          latestLastProvider = payload.lastProvider ?? null;
+        }
         suggestCacheRef.current.set(cacheKey, matches);
+      } else {
+        const params = new URLSearchParams({
+          project: searchProject.trim(),
+          country: searchCountry.trim(),
+          strictCountry: String(strictCountry),
+        });
+        const res = await fetch(`/api/domains/suggest?${params.toString()}`);
+        const payload = res.ok
+          ? await res.json() as { matches?: DomainItem[]; lastProvider?: string | null } | DomainItem[]
+          : [];
+        if (!Array.isArray(payload)) {
+          latestLastProvider = payload.lastProvider ?? null;
+          if (payload.matches) {
+            matches = payload.matches;
+            suggestCacheRef.current.set(cacheKey, matches);
+          }
+        }
       }
 
       if (matches.length === 0) {
         alert("No available domain found for this project");
         setMatchedDomains([]);
         setCurrentIndex(0);
+        setLastProvider(latestLastProvider);
+        setProviderWarning("");
         return;
       }
 
+      setLastProvider(latestLastProvider);
       setMatchedDomains(matches);
       setCurrentIndex(0);
+      updateProviderWarning(0, matches, latestLastProvider);
     } finally {
       setIsSuggestingDomain(false);
     }
@@ -955,25 +1029,54 @@ export default function DomainManager() {
               <p className="text-xs font-medium tracking-wide text-zinc-500">
                 {currentIndex + 1} / {matchedDomains.length}
               </p>
+
+              {providerWarning && (
+                <div
+                  role="alert"
+                  className="mt-2 w-full rounded-xl border border-amber-400/45 bg-gradient-to-r from-amber-500/15 to-orange-500/15 p-3 shadow-[0_0_0_1px_rgba(251,191,36,0.15)]"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-300/20 text-amber-200">
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 24 24"
+                        className="h-4 w-4"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M12 9v4" />
+                        <path d="M12 17h.01" />
+                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      </svg>
+                    </span>
+
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200/90">
+                        Provider Warning
+                      </p>
+                      <p className="text-sm leading-6 text-amber-100">
+                        {providerWarning}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="flex gap-2">
               <Button
                 variant="secondary"
-                onClick={() =>
-                  setCurrentIndex(i => Math.max(i - 1, 0))
-                }
+                onClick={handlePrevDomain}
               >
                 Back
               </Button>
 
               <Button
                 variant="secondary"
-                onClick={() =>
-                  setCurrentIndex(i =>
-                    Math.min(i + 1, matchedDomains.length - 1)
-                  )
-                }
+                onClick={handleNextDomain}
               >
                 Next
               </Button>
