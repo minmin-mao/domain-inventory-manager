@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
 const UNDO_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
@@ -9,24 +10,50 @@ const parsePositiveInt = (value: string | null, fallback: number) => {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
 };
 
-const matchesExpiryFilter = (expiry: Date | null, filter: string | null) => {
-  if (!filter || filter === "all") return true;
-  if (!expiry) return false;
+const getExpiryWhere = (expiry: string | null) => {
+  const now = new Date();
 
-  const now = Date.now();
-  const diffDays = Math.ceil((expiry.getTime() - now) / (1000 * 60 * 60 * 24));
-  const isExpired = expiry.getTime() < now;
-
-  switch (filter) {
+  switch (expiry) {
     case "expired":
-      return isExpired;
-    case "le30":
-      return !isExpired && diffDays <= 30;
-    case "le60":
-      return !isExpired && diffDays <= 60;
+      return { lt: now };
+    case "le30": {
+      const upperBound = new Date(now);
+      upperBound.setDate(upperBound.getDate() + 30);
+      return { gte: now, lte: upperBound };
+    }
+    case "le60": {
+      const upperBound = new Date(now);
+      upperBound.setDate(upperBound.getDate() + 60);
+      return { gte: now, lte: upperBound };
+    }
     default:
-      return true;
+      return undefined;
   }
+};
+
+const buildWhere = (searchParams: URLSearchParams): Prisma.DomainHistoryWhereInput => {
+  const search = searchParams.get("search")?.trim();
+  const hosting = searchParams.get("hostingProvider");
+  const project = searchParams.get("project");
+  const country = searchParams.get("country");
+  const expiry = searchParams.get("expiry");
+
+  return {
+    ...(search
+      ? {
+          OR: [
+            { domain: { contains: search, mode: "insensitive" } },
+            { project: { contains: search, mode: "insensitive" } },
+            { hosting: { contains: search, mode: "insensitive" } },
+            { country: { contains: search, mode: "insensitive" } },
+          ],
+        }
+      : {}),
+    ...(hosting ? { hosting } : {}),
+    ...(project ? { project } : {}),
+    ...(country ? { country } : {}),
+    ...(getExpiryWhere(expiry) ? { expiry: getExpiryWhere(expiry) } : {}),
+  };
 };
 
 export async function GET(req: Request) {
@@ -35,15 +62,17 @@ export async function GET(req: Request) {
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
     const includeTotal = searchParams.get("includeTotal") !== "false";
-    const search = searchParams.get("search")?.trim().toLowerCase() ?? "";
-    const hosting = searchParams.get("hostingProvider");
-    const project = searchParams.get("project");
-    const country = searchParams.get("country");
-    const expiryFilter = searchParams.get("expiry");
+    const where = buildWhere(searchParams);
+    const skip = (page - 1) * pageSize;
 
     const historyDelegate = (prisma as typeof prisma & {
       domainHistory?: {
-        findMany: (args: { orderBy: { createdAt: "desc" } }) => Promise<
+        findMany: (args: {
+          where?: Prisma.DomainHistoryWhereInput;
+          orderBy: { createdAt: "desc" };
+          skip?: number;
+          take?: number;
+        }) => Promise<
           Array<{
             id: string;
             domainId: string;
@@ -55,77 +84,65 @@ export async function GET(req: Request) {
             createdAt: Date;
           }>
         >;
+        count: (args: { where?: Prisma.DomainHistoryWhereInput }) => Promise<number>;
       };
     }).domainHistory;
+    if (historyDelegate) {
+      const [rows, total] = await Promise.all([
+        historyDelegate.findMany({
+          where,
+          orderBy: { createdAt: "desc" },
+          skip,
+          take: pageSize,
+        }),
+        includeTotal ? historyDelegate.count({ where }) : Promise.resolve(undefined),
+      ]);
 
-    const [history, takenDomains] = await Promise.all([
-      historyDelegate
-        ? historyDelegate.findMany({
-            orderBy: { createdAt: "desc" },
-          })
-        : Promise.resolve([]),
-      prisma.domain.findMany({
-        where: { status: "taken" },
-        orderBy: { usedAt: "desc" },
-      }),
-    ]);
-
-    const existingHistoryDomainIds = new Set(history.map((item) => item.domainId));
-
-    const legacyHistory = takenDomains
-      .filter((domain) => !existingHistoryDomainIds.has(domain.id))
-      .map((domain) => ({
-        id: `legacy-${domain.id}`,
-        domainId: domain.id,
-        domain: domain.domain,
-        hosting: domain.hosting,
-        expiry: domain.expiry,
-        project: domain.usedForProject || domain.project,
-        country: domain.usedForCountry || domain.country,
-        createdAt: domain.usedAt || domain.createdAt,
+      const items = rows.map((item) => ({
+        ...item,
         status: "taken" as const,
-        canUndo: Date.now() - new Date(domain.usedAt || domain.createdAt).getTime() <= UNDO_WINDOW_MS,
+        canUndo:
+          Date.now() - new Date(item.createdAt).getTime() <= UNDO_WINDOW_MS,
       }));
 
-    const payload = [...history.map((item) => ({
-      ...item,
-      status: "taken" as const,
-      canUndo:
-        Date.now() - new Date(item.createdAt).getTime() <= UNDO_WINDOW_MS,
-    })), ...legacyHistory].sort(
-      (a, b) =>
-        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    const filtered = payload.filter((item) => {
-      if (search) {
-        const haystack = [
-          item.domain,
-          item.project,
-          item.hosting,
-          item.country,
-        ].join(" ").toLowerCase();
-
-        if (!haystack.includes(search)) return false;
-      }
-
-      if (hosting && item.hosting !== hosting) return false;
-      if (project && item.project !== project) return false;
-      if (country && item.country !== country) return false;
-      if (!matchesExpiryFilter(item.expiry, expiryFilter)) return false;
-
-      return true;
-    });
-
-    if (!searchParams.has("page") && !searchParams.has("pageSize")) {
-      return NextResponse.json(filtered);
+      return NextResponse.json({
+        items,
+        total,
+        page,
+        pageSize,
+      });
     }
 
-    const start = (page - 1) * pageSize;
-    const items = filtered.slice(start, start + pageSize);
+    // Legacy fallback when DomainHistory delegate is unavailable.
+    const takenDomains = await prisma.domain.findMany({
+      where: { status: "taken" },
+      orderBy: { usedAt: "desc" },
+      skip,
+      take: pageSize,
+    });
+
+    const items = takenDomains.map((domain) => ({
+      id: `legacy-${domain.id}`,
+      domainId: domain.id,
+      domain: domain.domain,
+      hosting: domain.hosting,
+      expiry: domain.expiry,
+      project: domain.usedForProject || domain.project,
+      country: domain.usedForCountry || domain.country,
+      createdAt: domain.usedAt || domain.createdAt,
+      status: "taken" as const,
+      canUndo:
+        Date.now() - new Date(domain.usedAt || domain.createdAt).getTime() <=
+        UNDO_WINDOW_MS,
+    }));
+
+    const total = includeTotal
+      ? await prisma.domain.count({ where: { status: "taken" } })
+      : undefined;
 
     return NextResponse.json({
       items,
-      total: includeTotal ? filtered.length : undefined,
+      total,
       page,
       pageSize,
     });

@@ -396,6 +396,12 @@ export default function DomainManager() {
     await Promise.all(jobs);
   };
 
+  const queueRefresh = (args?: RefreshInventoryArgs) => {
+    void refreshInventoryData(args).catch((error) => {
+      console.error("Background refresh failed", error);
+    });
+  };
+
   refreshInventoryDataRef.current = refreshInventoryData;
 
   useEffect(() => {
@@ -630,13 +636,6 @@ export default function DomainManager() {
         );
       }
 
-      await refreshInventoryData({
-        refreshDomains: true,
-        refreshHistory: false,
-        refreshOptions: false,
-        includeTotal: false,
-      });
-
       setDomain("");
       setHosting("");
       setProject("");
@@ -645,6 +644,12 @@ export default function DomainManager() {
       setExpiry("");
 
       domainRef.current?.focus();
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: false,
+        refreshOptions: false,
+        includeTotal: false,
+      });
     } finally {
       setIsAddingDomain(false);
     }
@@ -667,7 +672,12 @@ export default function DomainManager() {
       method: "DELETE"
     });
 
-    await refreshInventoryData();
+    queueRefresh({
+      refreshDomains: true,
+      refreshHistory: false,
+      refreshOptions: true,
+      includeTotal: true,
+    });
   };
 
   const handleGoToDuplicate = () => {
@@ -736,7 +746,7 @@ export default function DomainManager() {
       setProviderWarning("");
       setTotalAvailable((prev) => Math.max(prev - 1, 0));
       setTotalHistory((prev) => prev + 1);
-      await refreshInventoryData({
+      queueRefresh({
         refreshDomains: true,
         refreshHistory: true,
         refreshOptions: false,
@@ -843,7 +853,7 @@ export default function DomainManager() {
       return;
     }
 
-    await refreshInventoryData({
+    queueRefresh({
       refreshDomains: true,
       refreshHistory: true,
       includeTotal: true,
@@ -869,7 +879,7 @@ export default function DomainManager() {
       return;
     }
 
-    await refreshInventoryData({
+    queueRefresh({
       refreshDomains: false,
       refreshHistory: true,
       includeTotal: true,
@@ -912,7 +922,7 @@ export default function DomainManager() {
     setEditingId(null);
     setEditDomain(null);
 
-    await refreshInventoryData({
+    queueRefresh({
       refreshDomains: true,
       refreshHistory: false,
       includeTotal: true,
