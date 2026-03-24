@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeDomain } from "@/lib/domain/domainUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
+import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 
@@ -137,6 +138,14 @@ export async function POST(req: Request) {
       },
     });
 
+    notifyInventoryUpdated({
+      source: "domains",
+      refreshDomains: true,
+      refreshHistory: false,
+      refreshOptions: true,
+      includeTotal: true,
+    });
+
     return NextResponse.json(domain);
   } catch (error) {
     console.error("Failed to create domain", error);
@@ -171,6 +180,14 @@ export async function PUT(req: Request) {
       },
     });
 
+    notifyInventoryUpdated({
+      source: "domains",
+      refreshDomains: true,
+      refreshHistory: false,
+      refreshOptions: true,
+      includeTotal: true,
+    });
+
     return NextResponse.json(updated);
   } catch (error) {
     console.error("Failed to update domain", error);
@@ -197,6 +214,14 @@ export async function DELETE(req: Request) {
 
   await prisma.domain.delete({
     where: { id },
+  });
+
+  notifyInventoryUpdated({
+    source: "domains",
+    refreshDomains: true,
+    refreshHistory: false,
+    refreshOptions: true,
+    includeTotal: true,
   });
 
   return NextResponse.json({ success: true });

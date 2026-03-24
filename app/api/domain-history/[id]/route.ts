@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
 import { NextResponse } from "next/server";
 
 const UNDO_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
@@ -81,6 +82,14 @@ export async function PATCH(
     }
   });
 
+  notifyInventoryUpdated({
+    source: "history",
+    refreshDomains: true,
+    refreshHistory: true,
+    refreshOptions: false,
+    includeTotal: true,
+  });
+
   return NextResponse.json({ success: true });
 }
 
@@ -108,6 +117,14 @@ export async function DELETE(
 
   await historyDelegate.delete({
     where: { id },
+  });
+
+  notifyInventoryUpdated({
+    source: "history",
+    refreshDomains: false,
+    refreshHistory: true,
+    refreshOptions: false,
+    includeTotal: true,
   });
 
   return NextResponse.json({ success: true });

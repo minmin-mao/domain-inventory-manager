@@ -36,6 +36,23 @@ type Option = {
   value: string;
 };
 
+type RefreshInventoryArgs = {
+  refreshDomains?: boolean;
+  refreshHistory?: boolean;
+  refreshOptions?: boolean;
+  includeTotal?: boolean;
+};
+
+type RealtimeInventoryUpdate = {
+  type: "inventory.updated";
+  refreshDomains: boolean;
+  refreshHistory: boolean;
+  refreshOptions: boolean;
+  includeTotal: boolean;
+  source: "domains" | "history" | "use";
+  at: string;
+};
+
 const DEFAULT_ROWS_PER_PAGE = 10;
 
 function buildInventoryQuery(
@@ -150,6 +167,14 @@ export default function DomainManager() {
   const totalAvailableRef = useRef(0);
   const totalHistoryRef = useRef(0);
   const suggestCacheRef = useRef<Map<string, DomainItem[]>>(new Map());
+  const refreshInventoryDataRef = useRef<(args?: RefreshInventoryArgs) => Promise<void>>(async () => {});
+  const realtimePendingRef = useRef<Required<RefreshInventoryArgs>>({
+    refreshDomains: false,
+    refreshHistory: false,
+    refreshOptions: false,
+    includeTotal: false,
+  });
+  const realtimeFlushTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     totalAvailableRef.current = totalAvailable;
@@ -301,12 +326,7 @@ export default function DomainManager() {
     refreshHistory = true,
     refreshOptions = false,
     includeTotal = false,
-  }: {
-    refreshDomains?: boolean;
-    refreshHistory?: boolean;
-    refreshOptions?: boolean;
-    includeTotal?: boolean;
-  } = {}) => {
+  }: RefreshInventoryArgs = {}) => {
     if (refreshDomains) {
       suggestCacheRef.current.clear();
     }
@@ -375,6 +395,61 @@ export default function DomainManager() {
 
     await Promise.all(jobs);
   };
+
+  refreshInventoryDataRef.current = refreshInventoryData;
+
+  useEffect(() => {
+    const source = new EventSource("/api/realtime/domains");
+
+    source.onmessage = (message) => {
+      try {
+        const payload = JSON.parse(message.data) as RealtimeInventoryUpdate | { type: "connected" | "heartbeat" };
+        if (payload.type !== "inventory.updated") return;
+
+        realtimePendingRef.current = {
+          refreshDomains:
+            realtimePendingRef.current.refreshDomains || payload.refreshDomains,
+          refreshHistory:
+            realtimePendingRef.current.refreshHistory || payload.refreshHistory,
+          refreshOptions:
+            realtimePendingRef.current.refreshOptions || payload.refreshOptions,
+          includeTotal:
+            realtimePendingRef.current.includeTotal || payload.includeTotal,
+        };
+
+        if (realtimeFlushTimerRef.current !== null) return;
+
+        realtimeFlushTimerRef.current = window.setTimeout(() => {
+          const pending = realtimePendingRef.current;
+          realtimePendingRef.current = {
+            refreshDomains: false,
+            refreshHistory: false,
+            refreshOptions: false,
+            includeTotal: false,
+          };
+          realtimeFlushTimerRef.current = null;
+
+          void refreshInventoryDataRef.current(pending).catch((error) => {
+            console.error("Failed to process realtime update", error);
+          });
+        }, 150);
+      } catch (error) {
+        console.error("Invalid realtime payload", error);
+      }
+    };
+
+    source.onerror = (error) => {
+      console.warn("Realtime connection issue", error);
+    };
+
+    return () => {
+      if (realtimeFlushTimerRef.current !== null) {
+        clearTimeout(realtimeFlushTimerRef.current);
+        realtimeFlushTimerRef.current = null;
+      }
+      source.close();
+    };
+  }, []);
 
 
   // ================================

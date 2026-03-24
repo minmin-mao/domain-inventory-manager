@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { capitalizeText } from "@/lib/domain/textUtils";
+import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
 import { NextResponse } from "next/server";
 
 type DomainHistoryCreateInput = {
@@ -99,6 +100,14 @@ export async function POST(req: Request) {
       });
 
       return { history, updatedDomain };
+    });
+
+    notifyInventoryUpdated({
+      source: "use",
+      refreshDomains: true,
+      refreshHistory: true,
+      refreshOptions: false,
+      includeTotal: true,
     });
 
     return NextResponse.json({
