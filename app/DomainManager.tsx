@@ -41,6 +41,7 @@ type RefreshInventoryArgs = {
   refreshHistory?: boolean;
   refreshOptions?: boolean;
   includeTotal?: boolean;
+  silent?: boolean;
 };
 
 type RealtimeInventoryUpdate = {
@@ -173,6 +174,7 @@ export default function DomainManager() {
     refreshHistory: false,
     refreshOptions: false,
     includeTotal: false,
+    silent: false,
   });
   const realtimeFlushTimerRef = useRef<number | null>(null);
 
@@ -326,13 +328,14 @@ export default function DomainManager() {
     refreshHistory = true,
     refreshOptions = false,
     includeTotal = false,
+    silent = false,
   }: RefreshInventoryArgs = {}) => {
     if (refreshDomains) {
       suggestCacheRef.current.clear();
     }
 
-    if (refreshDomains) setIsDomainsLoading(true);
-    if (refreshHistory) setIsHistoryLoading(true);
+    if (!silent && refreshDomains) setIsDomainsLoading(true);
+    if (!silent && refreshHistory) setIsHistoryLoading(true);
 
     const jobs: Promise<void>[] = [];
 
@@ -363,7 +366,7 @@ export default function DomainManager() {
             }
           })
           .finally(() => {
-            setIsDomainsLoading(false);
+            if (!silent) setIsDomainsLoading(false);
           })
       );
     }
@@ -388,7 +391,7 @@ export default function DomainManager() {
             }
           })
           .finally(() => {
-            setIsHistoryLoading(false);
+            if (!silent) setIsHistoryLoading(false);
           })
       );
     }
@@ -421,6 +424,7 @@ export default function DomainManager() {
             realtimePendingRef.current.refreshOptions || payload.refreshOptions,
           includeTotal:
             realtimePendingRef.current.includeTotal || payload.includeTotal,
+          silent: true,
         };
 
         if (realtimeFlushTimerRef.current !== null) return;
@@ -432,10 +436,14 @@ export default function DomainManager() {
             refreshHistory: false,
             refreshOptions: false,
             includeTotal: false,
+            silent: false,
           };
           realtimeFlushTimerRef.current = null;
 
-          void refreshInventoryDataRef.current(pending).catch((error) => {
+          void refreshInventoryDataRef.current({
+            ...pending,
+            silent: true,
+          }).catch((error) => {
             console.error("Failed to process realtime update", error);
           });
         }, 150);
@@ -898,34 +906,53 @@ export default function DomainManager() {
   };
 
   const handleSave = async () => {
-
     if (!editDomain) return;
+    const nextDomain = editDomain;
+    const previousDomain = domains.find((item) => item.id === nextDomain.id) ?? null;
 
-    const res = await fetch(`/api/domains`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(editDomain),
-    });
-
-    const contentType = res.headers.get("content-type") || "";
-    const data = contentType.includes("application/json")
-      ? await res.json()
-      : { error: "Unexpected server response." };
-
-    if (!res.ok) {
-      alert(data.error || "Failed to update domain.");
-      return;
-    }
-
+    // Optimistic UI update for snappy editing feedback.
+    setDomains((prev) =>
+      prev.map((item) => (item.id === nextDomain.id ? nextDomain : item))
+    );
     setEditingId(null);
     setEditDomain(null);
 
-    queueRefresh({
-      refreshDomains: true,
-      refreshHistory: false,
-      includeTotal: true,
+    void (async () => {
+      const res = await fetch(`/api/domains`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(nextDomain),
+      });
+
+      const contentType = res.headers.get("content-type") || "";
+      const data = contentType.includes("application/json")
+        ? await res.json()
+        : { error: "Unexpected server response." };
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update domain.");
+      }
+
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: false,
+        includeTotal: false,
+        silent: true,
+      });
+    })().catch((error) => {
+      if (previousDomain) {
+        setDomains((prev) =>
+          prev.map((item) =>
+            item.id === previousDomain.id ? previousDomain : item
+          )
+        );
+      }
+
+      setEditingId(nextDomain.id);
+      setEditDomain(nextDomain);
+      alert(error instanceof Error ? error.message : "Failed to update domain.");
     });
   };
   
