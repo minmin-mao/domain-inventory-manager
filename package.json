@@ -6,7 +6,14 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:local:up": "docker compose -f docker-compose.local.yml up -d",
+    "db:local:down": "docker compose -f docker-compose.local.yml down -v",
+    "db:local:push": "prisma db push",
+    "db:local:migrate": "prisma migrate dev",
+    "db:local:status": "prisma migrate status",
+    "db:backfill:pic:dry": "tsx scripts/backfill-pic-from-country.ts",
+    "db:backfill:pic:apply": "tsx scripts/backfill-pic-from-country.ts --apply"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.5.0",

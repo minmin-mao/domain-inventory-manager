@@ -10,6 +10,7 @@ type DomainHistoryCreateInput = {
   expiry: Date | null;
   project: string;
   country: string;
+  usedForPic: string;
   createdAt: Date;
 };
 
@@ -17,6 +18,7 @@ type UseDomainBody = {
   id?: string;
   project?: string;
   country?: string;
+  pic?: string;
 };
 
 const normalizeText = (value: string | undefined) =>
@@ -29,6 +31,7 @@ export async function POST(req: Request) {
     const domainId = body.id?.trim();
     const project = normalizeText(body.project);
     const country = normalizeText(body.country);
+    const pic = normalizeText(body.pic);
 
     if (!domainId) {
       return NextResponse.json({ error: "Missing domain id" }, { status: 400 });
@@ -40,6 +43,10 @@ export async function POST(req: Request) {
 
     if (!country) {
       return NextResponse.json({ error: "Country is required" }, { status: 400 });
+    }
+
+    if (!pic) {
+      return NextResponse.json({ error: "PIC is required" }, { status: 400 });
     }
 
     const domain = await prisma.domain.findUnique({
@@ -81,9 +88,10 @@ export async function POST(req: Request) {
               domainId: domain.id,
               domain: domain.domain,
               hosting: domain.hosting,
-              ...(domain.expiry ? { expiry: domain.expiry } : {}),
+              expiry: domain.expiry ?? null,
               project,
               country,
+              usedForPic: pic,
               createdAt: now,
             },
           })
@@ -96,6 +104,7 @@ export async function POST(req: Request) {
           usedAt: now,
           usedForProject: project,
           usedForCountry: country,
+          usedForPic: pic,
         },
       });
 

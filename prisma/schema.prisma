@@ -17,6 +17,7 @@ model Domain {
   usedAt         DateTime?
   usedForProject String?
   usedForCountry String?
+  usedForPic     String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
   status         DomainStatus
@@ -26,17 +27,19 @@ model Domain {
   @@index([country])
   @@index([hosting])
   @@index([expiry])
+  @@index([usedForCountry, usedForPic, usedAt])
 }
 
 model DomainHistory {
-  id        String   @id @default(cuid())
-  domainId  String
-  domain    String
-  hosting   String
-  expiry    DateTime?
-  project   String
-  country   String
-  createdAt DateTime @default(now())
+  id         String    @id @default(cuid())
+  domainId   String
+  domain     String
+  hosting    String
+  expiry     DateTime?
+  project    String
+  country    String
+  usedForPic String?
+  createdAt  DateTime  @default(now())
 
   @@index([domainId])
   @@index([createdAt])
@@ -44,6 +47,7 @@ model DomainHistory {
   @@index([country])
   @@index([hosting])
   @@index([expiry])
+  @@index([country, usedForPic, createdAt])
 }
 
 enum DomainStatus {

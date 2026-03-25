@@ -78,9 +78,10 @@ export async function GET(req: Request) {
             domainId: string;
             domain: string;
             hosting: string;
-            expiry: Date;
+            expiry: Date | null;
             project: string;
             country: string;
+            usedForPic: string | null;
             createdAt: Date;
           }>
         >;
@@ -129,6 +130,7 @@ export async function GET(req: Request) {
       expiry: domain.expiry,
       project: domain.usedForProject || domain.project,
       country: domain.usedForCountry || domain.country,
+      usedForPic: domain.usedForPic || null,
       createdAt: domain.usedAt || domain.createdAt,
       status: "taken" as const,
       canUndo:

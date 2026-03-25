@@ -44,6 +44,7 @@ export default function HistoryTable({
               <th className="px-4 py-3 text-left">Hosting</th>
               <th className="px-4 py-3 text-left">Project</th>
               <th className="px-4 py-3 text-left">Country</th>
+              <th className="px-4 py-3 text-left">PIC</th>
               <th className="px-4 py-3 text-left">Expiry</th>
               <th className="px-4 py-3 text-left">Days Left</th>
               <th className="px-4 py-3 text-left">Actions</th>
@@ -54,7 +55,7 @@ export default function HistoryTable({
             {isLoading ? (
               <tr>
                 <td
-                  colSpan={9}
+                  colSpan={10}
                   className="px-4 py-10 text-center text-sm text-zinc-400"
                 >
                   Loading history...
@@ -76,7 +77,8 @@ export default function HistoryTable({
                     </td>
                     <td className="px-4 py-3">{item.hosting}</td>
                     <td className="px-4 py-3">{item.project}</td>
-                    <td className="px-4 py-3 text-zinc-400">{item.country}</td>
+                    <td className="px-4 py-3 text-zinc-400">{item.country || "-"}</td>
+                    <td className="px-4 py-3 text-zinc-300">{item.usedForPic || "-"}</td>
                     <td className="px-4 py-3">
                       {item.expiry
                         ? new Date(item.expiry).toISOString().split("T")[0]

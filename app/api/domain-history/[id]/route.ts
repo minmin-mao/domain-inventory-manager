@@ -68,6 +68,7 @@ export async function PATCH(
         usedAt: null,
         usedForProject: null,
         usedForCountry: null,
+        usedForPic: null,
       },
     });
 

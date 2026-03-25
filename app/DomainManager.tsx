@@ -122,6 +122,7 @@ export default function DomainManager() {
 
   const [searchProject, setSearchProject] = useState("");
   const [searchCountry, setSearchCountry] = useState("");
+  const [searchPic, setSearchPic] = useState("");
   const [strictCountry, setStrictCountry] = useState(false);
   const [requestError, setRequestError] = useState("");
 
@@ -131,7 +132,6 @@ export default function DomainManager() {
 
   // warnings
   const [providerWarning, setProviderWarning] = useState("");
-  const [lastProvider, setLastProvider] = useState<string | null>(null);
   const [duplicateDomain, setDuplicateDomain] = useState<DomainItem | null>(null);
   const [highlightDomainId, setHighlightDomainId] = useState<string | null>(null);
 
@@ -140,6 +140,8 @@ export default function DomainManager() {
   const [accountOptions, setAccountOptions] = useState<string[]>([]);
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
+  const [picOptions, setPicOptions] = useState<string[]>([]);
+  const [picByCountryOptions, setPicByCountryOptions] = useState<Record<string, string[]>>({});
 
   // filters
   const [filters, setFilters] = useState<DomainFilters>({
@@ -202,6 +204,21 @@ export default function DomainManager() {
     [filters, debouncedSearch]
   );
 
+  const filteredPicOptions = useMemo(() => {
+    const countryKey = searchCountry.trim();
+    if (!countryKey) return picOptions;
+
+    const exactCountryMatch = picByCountryOptions[countryKey];
+    if (exactCountryMatch?.length) return exactCountryMatch;
+
+    const normalizedCountryKey = countryKey.toLowerCase();
+    const fallbackCountryMatch = Object.entries(picByCountryOptions).find(
+      ([country]) => country.toLowerCase() === normalizedCountryKey
+    );
+
+    return fallbackCountryMatch?.[1] ?? picOptions;
+  }, [picByCountryOptions, picOptions, searchCountry]);
+
   const loadDomainOptions = async () => {
     setIsOptionsLoading(true);
 
@@ -209,12 +226,21 @@ export default function DomainManager() {
       const res = await fetch("/api/domain-options");
       const data: DomainOptionSets = res.ok
         ? await res.json()
-        : { hosting: [], account: [], project: [], country: [] };
+        : {
+            hosting: [],
+            account: [],
+            project: [],
+            country: [],
+            pic: [],
+            picByCountry: {},
+          };
 
       setHostingOptions(data.hosting);
       setAccountOptions(data.account);
       setProjectOptions(data.project);
       setCountryOptions(data.country);
+      setPicOptions(data.pic);
+      setPicByCountryOptions(data.picByCountry);
     } finally {
       setIsOptionsLoading(false);
     }
@@ -227,6 +253,8 @@ export default function DomainManager() {
       setAccountOptions([]);
       setProjectOptions([]);
       setCountryOptions([]);
+      setPicOptions([]);
+      setPicByCountryOptions({});
       setIsOptionsLoading(false);
     });
   }, []);
@@ -485,48 +513,75 @@ export default function DomainManager() {
     ref.current?.focus();
   };
 
-  const updateProviderWarning = (
-    nextIndex: number,
-    nextMatches: DomainItem[],
-    provider: string | null
+  const getProviderWarningText = (
+    provider: string | null,
+    currentHosting: string,
+    pic: string,
+    country: string
   ) => {
-    if (!provider || nextMatches.length === 0) {
-      setProviderWarning("");
-      return;
-    }
-
-    const currentDomain = nextMatches[nextIndex];
-    if (!currentDomain) {
-      setProviderWarning("");
-      return;
-    }
+    if (!provider) return "";
 
     const isSameProvider =
-      currentDomain.hosting.trim().toLowerCase() ===
-      provider.trim().toLowerCase();
+      provider.trim().toLowerCase() === currentHosting.trim().toLowerCase();
 
-    setProviderWarning(
-      isSameProvider
-        ? `Warning: suggested domain uses the same provider as last used (${provider}) for this project and country.`
-        : ""
-    );
+    if (!isSameProvider) return "";
+
+    return `Warning: Last used provider for ${pic} was ${provider}. This domain uses the same provider.`;
   };
 
   const handlePrevDomain = () => {
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.max(prev - 1, 0);
-      updateProviderWarning(nextIndex, matchedDomains, lastProvider);
-      return nextIndex;
-    });
+    setCurrentIndex((prev) => Math.max(prev - 1, 0));
   };
 
   const handleNextDomain = () => {
-    setCurrentIndex((prev) => {
-      const nextIndex = Math.min(prev + 1, matchedDomains.length - 1);
-      updateProviderWarning(nextIndex, matchedDomains, lastProvider);
-      return nextIndex;
-    });
+    setCurrentIndex((prev) =>
+      Math.min(prev + 1, matchedDomains.length - 1)
+    );
   };
+
+  useEffect(() => {
+    const selectedDomain = matchedDomains[currentIndex];
+    const countryValue = searchCountry.trim();
+    const picValue = searchPic.trim();
+
+    if (!selectedDomain || !countryValue || !picValue) {
+      setProviderWarning("");
+      return;
+    }
+
+    let cancelled = false;
+    const params = new URLSearchParams({
+      country: countryValue,
+      pic: picValue,
+    });
+
+    void fetch(`/api/domains/last-provider?${params.toString()}`)
+      .then(async (res) =>
+        res.ok
+          ? await res.json() as { lastProvider: string | null }
+          : { lastProvider: null }
+      )
+      .then((payload) => {
+        if (cancelled) return;
+        setProviderWarning(
+          getProviderWarningText(
+            payload.lastProvider,
+            selectedDomain.hosting,
+            picValue,
+            countryValue
+          )
+        );
+      })
+      .catch((error) => {
+        console.error("Failed to load last provider", error);
+        if (cancelled) return;
+        setProviderWarning("");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentIndex, matchedDomains, searchCountry, searchPic]);
 
 
   // ================================
@@ -714,6 +769,7 @@ export default function DomainManager() {
     try {
       const projectValue = searchProject.trim();
       const requestCountry = capitalizeText(searchCountry.trim());
+      const requestPic = capitalizeText(searchPic.trim());
 
       if (!projectValue) {
         setRequestError("Project name is required.");
@@ -722,6 +778,11 @@ export default function DomainManager() {
 
       if (!requestCountry) {
         setRequestError("Country is required before you can use a domain.");
+        return;
+      }
+
+      if (!requestPic) {
+        setRequestError("PIC is required before you can use a domain.");
         return;
       }
 
@@ -734,6 +795,7 @@ export default function DomainManager() {
           id,
           project: projectValue,
           country: requestCountry,
+          pic: requestPic,
         }),
       });
 
@@ -749,6 +811,19 @@ export default function DomainManager() {
 
       setRequestError("");
       setSearchCountry(requestCountry);
+      setSearchPic(requestPic);
+      setPicOptions((prev) =>
+        requestPic && !prev.includes(requestPic) ? [...prev, requestPic].sort() : prev
+      );
+      setPicByCountryOptions((prev) => {
+        const currentForCountry = prev[requestCountry] ?? [];
+        if (currentForCountry.includes(requestPic)) return prev;
+
+        return {
+          ...prev,
+          [requestCountry]: [...currentForCountry, requestPic].sort(),
+        };
+      });
       setMatchedDomains([]);
       setCurrentIndex(0);
       setProviderWarning("");
@@ -785,7 +860,6 @@ export default function DomainManager() {
 
       const cacheKey = `${projectKey}|${countryKey}|${strictCountry ? "1" : "0"}`;
       let matches = suggestCacheRef.current.get(cacheKey);
-      let latestLastProvider: string | null = null;
 
       if (!matches) {
         const params = new URLSearchParams({
@@ -795,15 +869,9 @@ export default function DomainManager() {
         });
         const res = await fetch(`/api/domains/suggest?${params.toString()}`);
         const payload = res.ok
-          ? await res.json() as { matches?: DomainItem[]; lastProvider?: string | null } | DomainItem[]
+          ? await res.json() as { matches?: DomainItem[] } | DomainItem[]
           : [];
-        if (Array.isArray(payload)) {
-          matches = payload;
-          latestLastProvider = null;
-        } else {
-          matches = payload.matches ?? [];
-          latestLastProvider = payload.lastProvider ?? null;
-        }
+        matches = Array.isArray(payload) ? payload : payload.matches ?? [];
         suggestCacheRef.current.set(cacheKey, matches);
       } else {
         const params = new URLSearchParams({
@@ -813,14 +881,11 @@ export default function DomainManager() {
         });
         const res = await fetch(`/api/domains/suggest?${params.toString()}`);
         const payload = res.ok
-          ? await res.json() as { matches?: DomainItem[]; lastProvider?: string | null } | DomainItem[]
+          ? await res.json() as { matches?: DomainItem[] } | DomainItem[]
           : [];
-        if (!Array.isArray(payload)) {
-          latestLastProvider = payload.lastProvider ?? null;
-          if (payload.matches) {
-            matches = payload.matches;
-            suggestCacheRef.current.set(cacheKey, matches);
-          }
+        if (!Array.isArray(payload) && payload.matches) {
+          matches = payload.matches;
+          suggestCacheRef.current.set(cacheKey, matches);
         }
       }
 
@@ -828,15 +893,13 @@ export default function DomainManager() {
         alert("No available domain found for this project");
         setMatchedDomains([]);
         setCurrentIndex(0);
-        setLastProvider(latestLastProvider);
         setProviderWarning("");
         return;
       }
 
-      setLastProvider(latestLastProvider);
+      setProviderWarning("");
       setMatchedDomains(matches);
       setCurrentIndex(0);
-      updateProviderWarning(0, matches, latestLastProvider);
     } finally {
       setIsSuggestingDomain(false);
     }
@@ -1056,7 +1119,7 @@ export default function DomainManager() {
       {/* Request Domain */}
 
     <Card title="2. Request domain for project">
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-3">
 
         <Input
           placeholder="Project Name"
@@ -1075,6 +1138,17 @@ export default function DomainManager() {
             if (requestError) setRequestError("");
           }}
           required
+        />
+
+        <SmartDropdown
+          value={searchPic}
+          setValue={(value) => {
+            setSearchPic(capitalizeText(value));
+            if (requestError) setRequestError("");
+          }}
+          options={filteredPicOptions}
+          setOptions={setPicOptions}
+          placeholder="PIC"
         />
 
       </div>
@@ -1197,7 +1271,7 @@ export default function DomainManager() {
                 onClick={() =>
                   handleUseDomain(matchedDomains[currentIndex].id)
                 }
-                disabled={isUsingDomain}
+                disabled={isUsingDomain || !searchPic.trim()}
               >
                 {isUsingDomain ? "Using..." : "Use"}
               </Button>

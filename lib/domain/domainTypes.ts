@@ -13,12 +13,14 @@ export type DomainItem = {
   usedAt?: string
   usedForProject?: string
   usedForCountry?: string
+  usedForPic?: string
 
   previousState?: {
     status: "available" | "taken"
     usedAt?: string
     usedForProject?: string
     usedForCountry?: string
+    usedForPic?: string
   }
 }
 
@@ -30,6 +32,7 @@ export type DomainHistoryItem = {
   expiry: string | null
   project: string
   country: string
+  usedForPic?: string
   createdAt: string
   status: "taken"
   canUndo: boolean
@@ -57,4 +60,6 @@ export type DomainOptionSets = {
   account: string[];
   project: string[];
   country: string[];
+  pic: string[];
+  picByCountry: Record<string, string[]>;
 };

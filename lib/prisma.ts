@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { PrismaClient } from "@prisma/client"
 
 const connectionString =
+  process.env.LOCAL_DATABASE_URL ||
   process.env.POSTGRES_PRISMA_URL ||
   process.env.DATABASE_URL ||
   process.env.POSTGRES_URL ||
@@ -10,7 +11,7 @@ const connectionString =
 
 if (!connectionString) {
   throw new Error(
-    "Missing database connection string. Set POSTGRES_PRISMA_URL, DATABASE_URL, or POSTGRES_URL."
+    "Missing database connection string. Set LOCAL_DATABASE_URL, POSTGRES_PRISMA_URL, DATABASE_URL, or POSTGRES_URL."
   )
 }
 
