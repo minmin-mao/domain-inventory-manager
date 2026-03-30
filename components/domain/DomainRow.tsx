@@ -226,38 +226,40 @@ export default function DomainRow(props: Props) {
       </td>
 
       {/* Actions */}
-      <td className="px-4 py-3 flex gap-2">
-        {editingId === item.id ? (
-          <>
-            <Button onClick={handleSave}>Save</Button>
+      <td className="px-4 py-3">
+        <div className="flex min-w-[170px] justify-end gap-2">
+          {editingId === item.id ? (
+            <>
+              <Button onClick={handleSave}>Save</Button>
 
-            <Button
-              variant="secondary"
-              onClick={() => {
-                setEditingId(null);
-                setEditDomain(null);
-              }}
-            >
-              Cancel
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              variant="secondary"
-              onClick={() => handleEdit(item)}
-            >
-              Edit
-            </Button>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setEditingId(null);
+                  setEditDomain(null);
+                }}
+              >
+                Cancel
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="secondary"
+                onClick={() => handleEdit(item)}
+              >
+                Edit
+              </Button>
 
-            <Button
-              variant="secondary"
-              onClick={() => handleDeleteDomain(item.id)}
-            >
-              Delete
-            </Button>
-          </>
-        )}
+              <Button
+                variant="secondary"
+                onClick={() => handleDeleteDomain(item.id)}
+              >
+                Delete
+              </Button>
+            </>
+          )}
+        </div>
       </td>
     </tr>
   );

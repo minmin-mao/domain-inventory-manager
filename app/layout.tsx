@@ -17,7 +17,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <main className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        <main className="mx-auto w-full max-w-[1800px] px-4 sm:px-6 lg:px-8 py-8">
           {children}
         </main>
       </body>

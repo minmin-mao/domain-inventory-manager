@@ -46,19 +46,20 @@ export default function HistoryTable({
         </div>
       ) : null}
       <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="min-w-[1220px] w-full text-sm">
           <thead className="bg-zinc-950 text-zinc-400">
             <tr>
-              <th className="px-4 py-3 text-left">#</th>
-              <th className="px-4 py-3 text-left">Domain</th>
-              <th className="px-4 py-3 text-left">Status</th>
-              <th className="px-4 py-3 text-left">Hosting</th>
-              <th className="px-4 py-3 text-left">Account</th>
-              <th className="px-4 py-3 text-left">Project</th>
-              <th className="px-4 py-3 text-left">Country</th>
-              <th className="px-4 py-3 text-left">PIC</th>
-              <th className="px-4 py-3 text-left">Used At</th>
-              <th className="px-4 py-3 text-left">Actions</th>
+              <th className="w-12 px-4 py-3 text-left">#</th>
+              <th className="min-w-[220px] px-4 py-3 text-left">Domain</th>
+              <th className="min-w-[120px] px-4 py-3 text-left">Status</th>
+              <th className="min-w-[140px] px-4 py-3 text-left">Hosting</th>
+              <th className="min-w-[120px] px-4 py-3 text-left">Account</th>
+              <th className="min-w-[120px] px-4 py-3 text-left">Project</th>
+              <th className="min-w-[110px] px-4 py-3 text-left">Country</th>
+              <th className="min-w-[140px] px-4 py-3 text-left">PIC</th>
+              <th className="min-w-[180px] px-4 py-3 text-left">Used At</th>
+              <th className="min-w-[210px] px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
 
@@ -125,7 +126,7 @@ export default function HistoryTable({
                       })}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex min-w-[190px] flex-wrap justify-end gap-2">
                         {isBackup && onAssignPic ? (
                           <Button
                             variant="secondary"
@@ -161,6 +162,7 @@ export default function HistoryTable({
             )}
           </tbody>
         </table>
+        </div>
 
         <div className="border-t border-zinc-800 px-4 py-3 flex items-center justify-between text-sm text-zinc-400">
           <span>
