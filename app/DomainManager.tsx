@@ -295,63 +295,130 @@ export default function DomainManager() {
     pic: includePic ? filters.pic ?? null : null,
   });
 
-  const prefetchAvailableNextPage = async () => {
-    const query = buildInventoryQuery(
+  const fetchPaginatedWithCache = async <T extends DomainItem | DomainHistoryItem>(
+    url: string,
+    fallback: PaginatedResponse<T>
+  ) => {
+    const cached = prefetchedPageCacheRef.current.get(url) as
+      | PaginatedResponse<T>
+      | undefined;
+
+    if (cached) {
+      return cached;
+    }
+
+    const res = await fetch(url);
+    const data: PaginatedResponse<T> = res.ok ? await res.json() : fallback;
+
+    prefetchedPageCacheRef.current.set(
+      url,
+      data as PaginatedResponse<DomainItem | DomainHistoryItem>
+    );
+
+    return data;
+  };
+
+  const getAvailablePageUrl = ({
+    page,
+    includeTotal,
+  }: {
+    page: number;
+    includeTotal: boolean;
+  }) =>
+    `/api/domains?${buildInventoryQuery(
       buildFiltersForSearch(debouncedTabSearches.available, false),
-      2,
+      page,
       rowsPerPage,
       {
         status: "available",
-        includeTotal: "false",
+        includeTotal: includeTotal ? "true" : "false",
       }
-    );
-    const url = `/api/domains?${query}`;
+    )}`;
 
-    if (prefetchedPageCacheRef.current.has(url)) return;
-
-    try {
-      const res = await fetch(url);
-      const data: PaginatedResponse<DomainItem> = res.ok
-        ? await res.json()
-        : { items: [], total: 0, page: 2, pageSize: rowsPerPage };
-
-      prefetchedPageCacheRef.current.set(
-        url,
-        data as PaginatedResponse<DomainItem | DomainHistoryItem>
-      );
-    } catch (error) {
-      console.error("Failed to prefetch available page 2", error);
-    }
-  };
-
-  const prefetchHistoryNextPage = async (usageType: "backup" | "pic") => {
-    const search =
-      usageType === "backup" ? debouncedTabSearches.backup : debouncedTabSearches.history;
-    const query = buildInventoryQuery(
-      buildFiltersForSearch(search, usageType === "pic"),
-      2,
+  const getHistoryPageUrl = ({
+    usageType,
+    page,
+    includeTotal,
+  }: {
+    usageType: "backup" | "pic";
+    page: number;
+    includeTotal: boolean;
+  }) =>
+    `/api/domain-history?${buildInventoryQuery(
+      buildFiltersForSearch(
+        usageType === "backup"
+          ? debouncedTabSearches.backup
+          : debouncedTabSearches.history,
+        usageType === "pic"
+      ),
+      page,
       rowsPerPage,
       {
         usageType,
-        includeTotal: "false",
+        includeTotal: includeTotal ? "true" : "false",
       }
-    );
-    const url = `/api/domain-history?${query}`;
+    )}`;
+
+  const prefetchAvailableNextPage = async ({
+    currentPage,
+    totalItems,
+  }: {
+    currentPage: number;
+    totalItems: number;
+  }) => {
+    const nextPage = currentPage + 1;
+    const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage));
+    if (nextPage > totalPages) return;
+
+    const url = getAvailablePageUrl({
+      page: nextPage,
+      includeTotal: false,
+    });
 
     if (prefetchedPageCacheRef.current.has(url)) return;
 
     try {
-      const res = await fetch(url);
-      const data: PaginatedResponse<DomainHistoryItem> = res.ok
-        ? await res.json()
-        : { items: [], total: 0, page: 2, pageSize: rowsPerPage };
-
-      prefetchedPageCacheRef.current.set(
-        url,
-        data as PaginatedResponse<DomainItem | DomainHistoryItem>
-      );
+      await fetchPaginatedWithCache<DomainItem>(url, {
+        items: [],
+        total: 0,
+        page: nextPage,
+        pageSize: rowsPerPage,
+      });
     } catch (error) {
-      console.error(`Failed to prefetch ${usageType} page 2`, error);
+      console.error(`Failed to prefetch available page ${nextPage}`, error);
+    }
+  };
+
+  const prefetchHistoryNextPage = async ({
+    usageType,
+    currentPage,
+    totalItems,
+  }: {
+    usageType: "backup" | "pic";
+    currentPage: number;
+    totalItems: number;
+  }) => {
+    const nextPage = currentPage + 1;
+    const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage));
+    if (nextPage > totalPages) return;
+
+    const url = getHistoryPageUrl({
+      usageType,
+      page: nextPage,
+      includeTotal: false,
+    });
+
+    if (prefetchedPageCacheRef.current.has(url)) return;
+
+    try {
+      await fetchPaginatedWithCache<DomainHistoryItem>(url, {
+        items: [],
+        total: 0,
+        page: nextPage,
+        pageSize: rowsPerPage,
+      });
+    } catch (error) {
+      console.error(`Failed to prefetch ${usageType} page ${nextPage}`, error);
     }
   };
 
@@ -366,32 +433,15 @@ export default function DomainManager() {
   }) => {
     if (!silent) setIsDomainsLoading(true);
 
-    const query = buildInventoryQuery(
-      buildFiltersForSearch(debouncedTabSearches.available, false),
-      page,
-      rowsPerPage,
-      {
-        status: "available",
-        includeTotal: includeTotal ? "true" : "false",
-      }
-    );
-    const url = `/api/domains?${query}`;
+    const url = getAvailablePageUrl({ page, includeTotal });
 
     try {
-      const cached = prefetchedPageCacheRef.current.get(url) as
-        | PaginatedResponse<DomainItem>
-        | undefined;
-      const data: PaginatedResponse<DomainItem> = cached
-        ? cached
-        : await fetch(url).then(async (res) =>
-            res.ok
-              ? await res.json()
-              : { items: [], total: 0, page: 1, pageSize: rowsPerPage }
-          );
-
-      if (cached) {
-        prefetchedPageCacheRef.current.delete(url);
-      }
+      const data = await fetchPaginatedWithCache<DomainItem>(url, {
+        items: [],
+        total: 0,
+        page,
+        pageSize: rowsPerPage,
+      });
 
       setDomains(data.items);
       if (typeof data.total === "number") {
@@ -400,8 +450,11 @@ export default function DomainManager() {
 
       const effectiveTotal =
         typeof data.total === "number" ? data.total : totalAvailableRef.current;
-      if (activeTab === "available" && page === 1 && effectiveTotal > rowsPerPage) {
-        void prefetchAvailableNextPage();
+      if (activeTab === "available") {
+        void prefetchAvailableNextPage({
+          currentPage: page,
+          totalItems: effectiveTotal,
+        });
       }
     } catch (error) {
       console.error("Failed to load domains", error);
@@ -454,37 +507,18 @@ export default function DomainManager() {
     const setLoading = usageType === "backup" ? setIsBackupLoading : setIsHistoryLoading;
     const setRows = usageType === "backup" ? setBackupHistory : setFinalHistory;
     const setTotal = usageType === "backup" ? setTotalBackup : setTotalHistory;
-    const search =
-      usageType === "backup" ? debouncedTabSearches.backup : debouncedTabSearches.history;
 
     if (!silent) setLoading(true);
 
-    const query = buildInventoryQuery(
-      buildFiltersForSearch(search, usageType === "pic"),
-      page,
-      rowsPerPage,
-      {
-        usageType,
-        includeTotal: includeTotal ? "true" : "false",
-      }
-    );
-    const url = `/api/domain-history?${query}`;
+    const url = getHistoryPageUrl({ usageType, page, includeTotal });
 
     try {
-      const cached = prefetchedPageCacheRef.current.get(url) as
-        | PaginatedResponse<DomainHistoryItem>
-        | undefined;
-      const data: PaginatedResponse<DomainHistoryItem> = cached
-        ? cached
-        : await fetch(url).then(async (res) =>
-            res.ok
-              ? await res.json()
-              : { items: [], total: 0, page: 1, pageSize: rowsPerPage }
-          );
-
-      if (cached) {
-        prefetchedPageCacheRef.current.delete(url);
-      }
+      const data = await fetchPaginatedWithCache<DomainHistoryItem>(url, {
+        items: [],
+        total: 0,
+        page,
+        pageSize: rowsPerPage,
+      });
 
       setRows(data.items);
       if (typeof data.total === "number") {
@@ -501,8 +535,12 @@ export default function DomainManager() {
             ? totalBackupRef.current
             : totalHistoryRef.current;
 
-      if (isActiveUsage && page === 1 && effectiveTotal > rowsPerPage) {
-        void prefetchHistoryNextPage(usageType);
+      if (isActiveUsage) {
+        void prefetchHistoryNextPage({
+          usageType,
+          currentPage: page,
+          totalItems: effectiveTotal,
+        });
       }
     } catch (error) {
       console.error(`Failed to load ${usageType} history`, error);
