@@ -4,6 +4,9 @@ import { NextResponse } from "next/server";
 
 const UNDO_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
 const DEFAULT_PAGE_SIZE = 10;
+const EMPTY_PIC_VALUES = ["", "-", "—"];
+
+type UsageType = "backup" | "pic";
 
 const parsePositiveInt = (value: string | null, fallback: number) => {
   const parsed = Number(value);
@@ -31,29 +34,117 @@ const getExpiryWhere = (expiry: string | null) => {
   }
 };
 
-const buildWhere = (searchParams: URLSearchParams): Prisma.DomainHistoryWhereInput => {
+const getUsageType = (value: string | null | undefined): UsageType => {
+  const normalized = value?.trim() ?? "";
+  return !normalized || EMPTY_PIC_VALUES.includes(normalized) ? "backup" : "pic";
+};
+
+const buildLegacyWhere = (searchParams: URLSearchParams): Prisma.DomainWhereInput => {
   const search = searchParams.get("search")?.trim();
   const hosting = searchParams.get("hostingProvider");
   const project = searchParams.get("project");
   const country = searchParams.get("country");
+  const pic = searchParams.get("pic")?.trim();
   const expiry = searchParams.get("expiry");
+  const usageType = searchParams.get("usageType") as UsageType | null;
 
-  return {
-    ...(search
-      ? {
-          OR: [
-            { domain: { contains: search, mode: "insensitive" } },
-            { project: { contains: search, mode: "insensitive" } },
-            { hosting: { contains: search, mode: "insensitive" } },
-            { country: { contains: search, mode: "insensitive" } },
-          ],
-        }
-      : {}),
-    ...(hosting ? { hosting } : {}),
-    ...(project ? { project } : {}),
-    ...(country ? { country } : {}),
-    ...(getExpiryWhere(expiry) ? { expiry: getExpiryWhere(expiry) } : {}),
-  };
+  const clauses: Prisma.DomainWhereInput[] = [{ status: "taken" }];
+
+  if (hosting) clauses.push({ hosting });
+  if (project) clauses.push({ usedForProject: project });
+  if (country) clauses.push({ usedForCountry: country });
+  if (pic) {
+    clauses.push({
+      usedForPic: {
+        equals: pic,
+        mode: "insensitive",
+      },
+    });
+  }
+
+  if (search) {
+    clauses.push({
+      OR: [
+        { domain: { contains: search, mode: "insensitive" } },
+        { hosting: { contains: search, mode: "insensitive" } },
+        { account: { contains: search, mode: "insensitive" } },
+        { usedForProject: { contains: search, mode: "insensitive" } },
+        { usedForCountry: { contains: search, mode: "insensitive" } },
+        { usedForPic: { contains: search, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  const expiryWhere = getExpiryWhere(expiry);
+  if (expiryWhere) clauses.push({ expiry: expiryWhere });
+
+  if (usageType === "backup") {
+    clauses.push({
+      OR: [{ usedForPic: null }, ...EMPTY_PIC_VALUES.map((value) => ({ usedForPic: value }))],
+    });
+  }
+
+  if (usageType === "pic") {
+    clauses.push({
+      AND: [
+        { NOT: { usedForPic: null } },
+        ...EMPTY_PIC_VALUES.map((value) => ({ NOT: { usedForPic: value } })),
+      ],
+    });
+  }
+
+  return clauses.length === 1 ? clauses[0] : { AND: clauses };
+};
+
+const buildHistoryWhereSql = (searchParams: URLSearchParams) => {
+  const hosting = searchParams.get("hostingProvider");
+  const project = searchParams.get("project");
+  const country = searchParams.get("country");
+  const pic = searchParams.get("pic")?.trim();
+  const search = searchParams.get("search")?.trim();
+  const expiry = searchParams.get("expiry");
+  const usageType = searchParams.get("usageType") as UsageType | null;
+
+  const clauses: Prisma.Sql[] = [];
+
+  if (hosting) clauses.push(Prisma.sql`dh."hosting" = ${hosting}`);
+  if (project) clauses.push(Prisma.sql`dh."project" = ${project}`);
+  if (country) clauses.push(Prisma.sql`dh."country" = ${country}`);
+  if (pic) {
+    clauses.push(Prisma.sql`LOWER(COALESCE(dh."usedForPic", '')) = LOWER(${pic})`);
+  }
+
+  if (search) {
+    const likeSearch = `%${search.toLowerCase()}%`;
+    clauses.push(Prisma.sql`
+      (
+        LOWER(dh."domain") LIKE ${likeSearch}
+        OR LOWER(dh."hosting") LIKE ${likeSearch}
+        OR LOWER(COALESCE(d."account", '')) LIKE ${likeSearch}
+        OR LOWER(dh."project") LIKE ${likeSearch}
+        OR LOWER(dh."country") LIKE ${likeSearch}
+        OR LOWER(COALESCE(dh."usedForPic", '')) LIKE ${likeSearch}
+      )
+    `);
+  }
+
+  const expiryWhere = getExpiryWhere(expiry);
+  if (expiryWhere?.lt) clauses.push(Prisma.sql`dh."expiry" < ${expiryWhere.lt}`);
+  if (expiryWhere?.gte && expiryWhere?.lte) {
+    clauses.push(Prisma.sql`dh."expiry" >= ${expiryWhere.gte} AND dh."expiry" <= ${expiryWhere.lte}`);
+  }
+
+  if (usageType === "backup") {
+    clauses.push(Prisma.sql`(dh."usedForPic" IS NULL OR BTRIM(dh."usedForPic") IN ('', '-', '—'))`);
+  }
+
+  if (usageType === "pic") {
+    clauses.push(Prisma.sql`(dh."usedForPic" IS NOT NULL AND BTRIM(dh."usedForPic") NOT IN ('', '-', '—'))`);
+  }
+
+  if (clauses.length === 0) return Prisma.empty;
+
+  return Prisma.sql`WHERE ${Prisma.join(clauses, " AND ")}`;
 };
 
 export async function GET(req: Request) {
@@ -62,88 +153,96 @@ export async function GET(req: Request) {
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = parsePositiveInt(searchParams.get("pageSize"), DEFAULT_PAGE_SIZE);
     const includeTotal = searchParams.get("includeTotal") !== "false";
-    const where = buildWhere(searchParams);
     const skip = (page - 1) * pageSize;
+    const whereSql = buildHistoryWhereSql(searchParams);
 
-    const historyDelegate = (prisma as typeof prisma & {
-      domainHistory?: {
-        findMany: (args: {
-          where?: Prisma.DomainHistoryWhereInput;
-          orderBy: { createdAt: "desc" };
-          skip?: number;
-          take?: number;
-        }) => Promise<
-          Array<{
-            id: string;
-            domainId: string;
-            domain: string;
-            hosting: string;
-            expiry: Date | null;
-            project: string;
-            country: string;
-            usedForPic: string | null;
-            createdAt: Date;
-          }>
-        >;
-        count: (args: { where?: Prisma.DomainHistoryWhereInput }) => Promise<number>;
-      };
-    }).domainHistory;
-    if (historyDelegate) {
-      const [rows, total] = await Promise.all([
-        historyDelegate.findMany({
-          where,
-          orderBy: { createdAt: "desc" },
-          skip,
-          take: pageSize,
-        }),
-        includeTotal ? historyDelegate.count({ where }) : Promise.resolve(undefined),
-      ]);
+    try {
+      const items = await prisma.$queryRaw<
+        Array<{
+          id: string;
+          domainId: string;
+          domain: string;
+          hosting: string;
+          account: string | null;
+          expiry: Date | null;
+          project: string;
+          country: string;
+          usedForPic: string | null;
+          createdAt: Date;
+        }>
+      >(Prisma.sql`
+        SELECT
+          dh."id",
+          dh."domainId",
+          dh."domain",
+          dh."hosting",
+          d."account",
+          dh."expiry",
+          dh."project",
+          dh."country",
+          dh."usedForPic",
+          dh."createdAt"
+        FROM "DomainHistory" dh
+        LEFT JOIN "Domain" d ON d."id" = dh."domainId"
+        ${whereSql}
+        ORDER BY dh."createdAt" DESC
+        OFFSET ${skip}
+        LIMIT ${pageSize}
+      `);
 
-      const items = rows.map((item) => ({
-        ...item,
-        status: "taken" as const,
-        canUndo:
-          Date.now() - new Date(item.createdAt).getTime() <= UNDO_WINDOW_MS,
-      }));
+      const total = includeTotal
+        ? await prisma.$queryRaw<Array<{ total: number }>>(Prisma.sql`
+            SELECT COUNT(*)::int AS total
+            FROM "DomainHistory" dh
+            LEFT JOIN "Domain" d ON d."id" = dh."domainId"
+            ${whereSql}
+          `)
+        : undefined;
 
       return NextResponse.json({
-        items,
-        total,
+        items: items.map((item) => ({
+          ...item,
+          account: item.account || "-",
+          usageType: getUsageType(item.usedForPic),
+          status: "taken" as const,
+          canUndo:
+            Date.now() - new Date(item.createdAt).getTime() <= UNDO_WINDOW_MS,
+        })),
+        total: total?.[0]?.total,
         page,
         pageSize,
       });
+    } catch (rawError) {
+      console.warn("Falling back to legacy domain-history query path", rawError);
     }
 
-    // Legacy fallback when DomainHistory delegate is unavailable.
+    const where = buildLegacyWhere(searchParams);
     const takenDomains = await prisma.domain.findMany({
-      where: { status: "taken" },
+      where,
       orderBy: { usedAt: "desc" },
       skip,
       take: pageSize,
     });
-
-    const items = takenDomains.map((domain) => ({
-      id: `legacy-${domain.id}`,
-      domainId: domain.id,
-      domain: domain.domain,
-      hosting: domain.hosting,
-      expiry: domain.expiry,
-      project: domain.usedForProject || domain.project,
-      country: domain.usedForCountry || domain.country,
-      usedForPic: domain.usedForPic || null,
-      createdAt: domain.usedAt || domain.createdAt,
-      status: "taken" as const,
-      canUndo:
-        Date.now() - new Date(domain.usedAt || domain.createdAt).getTime() <=
-        UNDO_WINDOW_MS,
-    }));
-
-    const total = includeTotal
-      ? await prisma.domain.count({ where: { status: "taken" } })
-      : undefined;
+    const total = includeTotal ? await prisma.domain.count({ where }) : undefined;
 
     return NextResponse.json({
-      items,
+      items: takenDomains.map((domain) => ({
+        id: `legacy-${domain.id}`,
+        domainId: domain.id,
+        domain: domain.domain,
+        hosting: domain.hosting,
+        account: domain.account,
+        expiry: domain.expiry,
+        project: domain.usedForProject || domain.project,
+        country: domain.usedForCountry || domain.country,
+        usedForPic: domain.usedForPic || null,
+        createdAt: domain.usedAt || domain.createdAt,
+        usageType: getUsageType(domain.usedForPic),
+        status: "taken" as const,
+        canUndo:
+          Date.now() - new Date(domain.usedAt || domain.createdAt).getTime() <=
+          UNDO_WINDOW_MS,
+      })),
       total,
       page,
       pageSize,

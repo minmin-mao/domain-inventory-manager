@@ -54,7 +54,10 @@ type RealtimeInventoryUpdate = {
   at: string;
 };
 
-const DEFAULT_ROWS_PER_PAGE = 10;
+type DashboardTab = "available" | "backup" | "history";
+type UseMode = "pic" | "backup";
+
+const DEFAULT_ROWS_PER_PAGE = 5;
 
 function buildInventoryQuery(
   filters: DomainFilters,
@@ -72,6 +75,7 @@ function buildInventoryQuery(
   if (filters.hostingProvider) searchParams.set("hostingProvider", filters.hostingProvider);
   if (filters.project) searchParams.set("project", filters.project);
   if (filters.country) searchParams.set("country", filters.country);
+  if (filters.pic) searchParams.set("pic", filters.pic);
 
   if (extraParams) {
     Object.entries(extraParams).forEach(([key, value]) => {
@@ -106,7 +110,14 @@ export default function DomainManager() {
   // ================================
 
   const [domains, setDomains] = useState<DomainItem[]>([]);
-  const [history, setHistory] = useState<DomainHistoryItem[]>([]);
+  const [backupHistory, setBackupHistory] = useState<DomainHistoryItem[]>([]);
+  const [finalHistory, setFinalHistory] = useState<DomainHistoryItem[]>([]);
+  const [activeTab, setActiveTab] = useState<DashboardTab>("available");
+  const [loadedTabs, setLoadedTabs] = useState<Record<DashboardTab, boolean>>({
+    available: true,
+    backup: false,
+    history: false,
+  });
 
   // form fields
   const [domain, setDomain] = useState("");
@@ -123,6 +134,7 @@ export default function DomainManager() {
   const [searchProject, setSearchProject] = useState("");
   const [searchCountry, setSearchCountry] = useState("");
   const [searchPic, setSearchPic] = useState("");
+  const [useMode, setUseMode] = useState<UseMode>("pic");
   const [strictCountry, setStrictCountry] = useState(false);
   const [requestError, setRequestError] = useState("");
 
@@ -134,6 +146,7 @@ export default function DomainManager() {
   const [providerWarning, setProviderWarning] = useState("");
   const [duplicateDomain, setDuplicateDomain] = useState<DomainItem | null>(null);
   const [highlightDomainId, setHighlightDomainId] = useState<string | null>(null);
+  const [highlightHistoryDomainId, setHighlightHistoryDomainId] = useState<string | null>(null);
 
   // dropdown options
   const [hostingOptions, setHostingOptions] = useState<string[]>([]);
@@ -150,26 +163,47 @@ export default function DomainManager() {
     hostingProvider: null,
     project: null,
     country: null,
+    pic: null,
+  });
+  const [tabSearches, setTabSearches] = useState<Record<DashboardTab, string>>({
+    available: "",
+    backup: "",
+    history: "",
+  });
+  const [debouncedTabSearches, setDebouncedTabSearches] = useState<
+    Record<DashboardTab, string>
+  >({
+    available: "",
+    backup: "",
+    history: "",
   });
 
   // pagination state
   const [pageAvailable, setPageAvailable] = useState(1);
+  const [pageBackup, setPageBackup] = useState(1);
   const [pageHistory, setPageHistory] = useState(1);
   const [totalAvailable, setTotalAvailable] = useState(0);
+  const [totalBackup, setTotalBackup] = useState(0);
   const [totalHistory, setTotalHistory] = useState(0);
   const [historyActionId, setHistoryActionId] = useState<string | null>(null);
   const [isDomainsLoading, setIsDomainsLoading] = useState(true);
-  const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+  const [isBackupLoading, setIsBackupLoading] = useState(false);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isAddingDomain, setIsAddingDomain] = useState(false);
   const [isUsingDomain, setIsUsingDomain] = useState(false);
   const [isSuggestingDomain, setIsSuggestingDomain] = useState(false);
-  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [assignPicTarget, setAssignPicTarget] = useState<DomainHistoryItem | null>(null);
+  const [assignPicValue, setAssignPicValue] = useState("");
 
   const rowsPerPage = DEFAULT_ROWS_PER_PAGE;
   const totalAvailableRef = useRef(0);
+  const totalBackupRef = useRef(0);
   const totalHistoryRef = useRef(0);
   const suggestCacheRef = useRef<Map<string, DomainItem[]>>(new Map());
+  const prefetchedPageCacheRef = useRef<
+    Map<string, PaginatedResponse<DomainItem | DomainHistoryItem>>
+  >(new Map());
   const refreshInventoryDataRef = useRef<(args?: RefreshInventoryArgs) => Promise<void>>(async () => {});
   const realtimePendingRef = useRef<Required<RefreshInventoryArgs>>({
     refreshDomains: false,
@@ -189,20 +223,16 @@ export default function DomainManager() {
   }, [totalHistory]);
 
   useEffect(() => {
+    totalBackupRef.current = totalBackup;
+  }, [totalBackup]);
+
+  useEffect(() => {
     const timer = setTimeout(() => {
-      setDebouncedSearch(filters.search);
+      setDebouncedTabSearches(tabSearches);
     }, 250);
 
     return () => clearTimeout(timer);
-  }, [filters.search]);
-
-  const queryFilters = useMemo(
-    () => ({
-      ...filters,
-      search: debouncedSearch,
-    }),
-    [filters, debouncedSearch]
-  );
+  }, [tabSearches]);
 
   const filteredPicOptions = useMemo(() => {
     const countryKey = searchCountry.trim();
@@ -259,97 +289,395 @@ export default function DomainManager() {
     });
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    const includeTotal = pageAvailable === 1 || totalAvailableRef.current === 0;
+  const buildFiltersForSearch = (search: string, includePic = false): DomainFilters => ({
+    ...filters,
+    search,
+    pic: includePic ? filters.pic ?? null : null,
+  });
+
+  const prefetchAvailableNextPage = async () => {
     const query = buildInventoryQuery(
-      queryFilters,
-      pageAvailable,
+      buildFiltersForSearch(debouncedTabSearches.available, false),
+      2,
+      rowsPerPage,
+      {
+        status: "available",
+        includeTotal: "false",
+      }
+    );
+    const url = `/api/domains?${query}`;
+
+    if (prefetchedPageCacheRef.current.has(url)) return;
+
+    try {
+      const res = await fetch(url);
+      const data: PaginatedResponse<DomainItem> = res.ok
+        ? await res.json()
+        : { items: [], total: 0, page: 2, pageSize: rowsPerPage };
+
+      prefetchedPageCacheRef.current.set(
+        url,
+        data as PaginatedResponse<DomainItem | DomainHistoryItem>
+      );
+    } catch (error) {
+      console.error("Failed to prefetch available page 2", error);
+    }
+  };
+
+  const prefetchHistoryNextPage = async (usageType: "backup" | "pic") => {
+    const search =
+      usageType === "backup" ? debouncedTabSearches.backup : debouncedTabSearches.history;
+    const query = buildInventoryQuery(
+      buildFiltersForSearch(search, usageType === "pic"),
+      2,
+      rowsPerPage,
+      {
+        usageType,
+        includeTotal: "false",
+      }
+    );
+    const url = `/api/domain-history?${query}`;
+
+    if (prefetchedPageCacheRef.current.has(url)) return;
+
+    try {
+      const res = await fetch(url);
+      const data: PaginatedResponse<DomainHistoryItem> = res.ok
+        ? await res.json()
+        : { items: [], total: 0, page: 2, pageSize: rowsPerPage };
+
+      prefetchedPageCacheRef.current.set(
+        url,
+        data as PaginatedResponse<DomainItem | DomainHistoryItem>
+      );
+    } catch (error) {
+      console.error(`Failed to prefetch ${usageType} page 2`, error);
+    }
+  };
+
+  const loadAvailableDomains = async ({
+    page,
+    includeTotal,
+    silent,
+  }: {
+    page: number;
+    includeTotal: boolean;
+    silent: boolean;
+  }) => {
+    if (!silent) setIsDomainsLoading(true);
+
+    const query = buildInventoryQuery(
+      buildFiltersForSearch(debouncedTabSearches.available, false),
+      page,
       rowsPerPage,
       {
         status: "available",
         includeTotal: includeTotal ? "true" : "false",
       }
     );
+    const url = `/api/domains?${query}`;
 
-    setIsDomainsLoading(true);
+    try {
+      const cached = prefetchedPageCacheRef.current.get(url) as
+        | PaginatedResponse<DomainItem>
+        | undefined;
+      const data: PaginatedResponse<DomainItem> = cached
+        ? cached
+        : await fetch(url).then(async (res) =>
+            res.ok
+              ? await res.json()
+              : { items: [], total: 0, page: 1, pageSize: rowsPerPage }
+          );
 
-    void fetch(`/api/domains?${query}`)
-      .then(async (res) => {
-        const data: PaginatedResponse<DomainItem> = res.ok
-          ? await res.json()
-          : { items: [], total: 0, page: 1, pageSize: rowsPerPage };
+      if (cached) {
+        prefetchedPageCacheRef.current.delete(url);
+      }
 
-        if (cancelled) return;
-        setDomains(data.items);
-        if (typeof data.total === "number") {
-          setTotalAvailable(data.total);
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load domains", error);
-        if (cancelled) return;
-        setDomains([]);
-        setTotalAvailable(0);
-      })
-      .finally(() => {
-        if (!cancelled) setIsDomainsLoading(false);
-      });
+      setDomains(data.items);
+      if (typeof data.total === "number") {
+        setTotalAvailable(data.total);
+      }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [queryFilters, pageAvailable, rowsPerPage]);
+      const effectiveTotal =
+        typeof data.total === "number" ? data.total : totalAvailableRef.current;
+      if (activeTab === "available" && page === 1 && effectiveTotal > rowsPerPage) {
+        void prefetchAvailableNextPage();
+      }
+    } catch (error) {
+      console.error("Failed to load domains", error);
+      setDomains([]);
+      setTotalAvailable(0);
+    } finally {
+      if (!silent) setIsDomainsLoading(false);
+    }
+  };
 
-  useEffect(() => {
-    let cancelled = false;
-    const includeTotal = pageHistory === 1 || totalHistoryRef.current === 0;
+  const loadAvailableSummary = async ({ silent }: { silent: boolean }) => {
     const query = buildInventoryQuery(
-      queryFilters,
-      pageHistory,
-      rowsPerPage,
-      { includeTotal: includeTotal ? "true" : "false" }
+      buildFiltersForSearch(debouncedTabSearches.available, false),
+      1,
+      1,
+      {
+        status: "available",
+        includeTotal: "true",
+      }
     );
 
-    setIsHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/domains?${query}`);
+      const data: PaginatedResponse<DomainItem> = res.ok
+        ? await res.json()
+        : { items: [], total: 0, page: 1, pageSize: 1 };
 
-    void fetch(`/api/domain-history?${query}`)
-      .then(async (res) => {
-        const data: PaginatedResponse<DomainHistoryItem> = res.ok
-          ? await res.json()
-          : { items: [], total: 0, page: 1, pageSize: rowsPerPage };
+      if (typeof data.total === "number") {
+        setTotalAvailable(data.total);
+      }
+    } catch (error) {
+      console.error("Failed to load domain summary", error);
+      if (!silent) {
+        setTotalAvailable(0);
+      }
+    }
+  };
 
-        if (cancelled) return;
-        setHistory(data.items);
-        if (typeof data.total === "number") {
-          setTotalHistory(data.total);
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load domain history", error);
-        if (cancelled) return;
-        setHistory([]);
-        setTotalHistory(0);
-      })
-      .finally(() => {
-        if (!cancelled) setIsHistoryLoading(false);
-      });
+  const loadHistoryUsage = async ({
+    usageType,
+    page,
+    includeTotal,
+    silent,
+  }: {
+    usageType: "backup" | "pic";
+    page: number;
+    includeTotal: boolean;
+    silent: boolean;
+  }) => {
+    const setLoading = usageType === "backup" ? setIsBackupLoading : setIsHistoryLoading;
+    const setRows = usageType === "backup" ? setBackupHistory : setFinalHistory;
+    const setTotal = usageType === "backup" ? setTotalBackup : setTotalHistory;
+    const search =
+      usageType === "backup" ? debouncedTabSearches.backup : debouncedTabSearches.history;
 
-    return () => {
-      cancelled = true;
-    };
-  }, [queryFilters, pageHistory, rowsPerPage]);
+    if (!silent) setLoading(true);
+
+    const query = buildInventoryQuery(
+      buildFiltersForSearch(search, usageType === "pic"),
+      page,
+      rowsPerPage,
+      {
+        usageType,
+        includeTotal: includeTotal ? "true" : "false",
+      }
+    );
+    const url = `/api/domain-history?${query}`;
+
+    try {
+      const cached = prefetchedPageCacheRef.current.get(url) as
+        | PaginatedResponse<DomainHistoryItem>
+        | undefined;
+      const data: PaginatedResponse<DomainHistoryItem> = cached
+        ? cached
+        : await fetch(url).then(async (res) =>
+            res.ok
+              ? await res.json()
+              : { items: [], total: 0, page: 1, pageSize: rowsPerPage }
+          );
+
+      if (cached) {
+        prefetchedPageCacheRef.current.delete(url);
+      }
+
+      setRows(data.items);
+      if (typeof data.total === "number") {
+        setTotal(data.total);
+      }
+
+      const isActiveUsage =
+        (usageType === "backup" && activeTab === "backup") ||
+        (usageType === "pic" && activeTab === "history");
+      const effectiveTotal =
+        typeof data.total === "number"
+          ? data.total
+          : usageType === "backup"
+            ? totalBackupRef.current
+            : totalHistoryRef.current;
+
+      if (isActiveUsage && page === 1 && effectiveTotal > rowsPerPage) {
+        void prefetchHistoryNextPage(usageType);
+      }
+    } catch (error) {
+      console.error(`Failed to load ${usageType} history`, error);
+      setRows([]);
+      setTotal(0);
+    } finally {
+      if (!silent) setLoading(false);
+    }
+  };
+
+  const loadHistorySummary = async ({
+    usageType,
+    silent,
+  }: {
+    usageType: "backup" | "pic";
+    silent: boolean;
+  }) => {
+    const setTotal = usageType === "backup" ? setTotalBackup : setTotalHistory;
+    const search =
+      usageType === "backup" ? debouncedTabSearches.backup : debouncedTabSearches.history;
+
+    const query = buildInventoryQuery(
+      buildFiltersForSearch(search, usageType === "pic"),
+      1,
+      1,
+      {
+        usageType,
+        includeTotal: "true",
+      }
+    );
+
+    try {
+      const res = await fetch(`/api/domain-history?${query}`);
+      const data: PaginatedResponse<DomainHistoryItem> = res.ok
+        ? await res.json()
+        : { items: [], total: 0, page: 1, pageSize: 1 };
+
+      if (typeof data.total === "number") {
+        setTotal(data.total);
+      }
+    } catch (error) {
+      console.error(`Failed to load ${usageType} summary`, error);
+      if (!silent) {
+        setTotal(0);
+      }
+    }
+  };
 
   useEffect(() => {
-    setPageAvailable(1);
-    setPageHistory(1);
+    setLoadedTabs((current) =>
+      current[activeTab] ? current : { ...current, [activeTab]: true }
+    );
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!loadedTabs.available) return;
+
+    const includeTotal = pageAvailable === 1 || totalAvailableRef.current === 0;
+
+    void loadAvailableDomains({
+      page: pageAvailable,
+      includeTotal,
+      silent: false,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    filters.search,
+    loadedTabs.available,
+    pageAvailable,
+    rowsPerPage,
     filters.expiry,
     filters.hostingProvider,
     filters.project,
     filters.country,
+    debouncedTabSearches.available,
   ]);
+
+  useEffect(() => {
+    if (!loadedTabs.backup) return;
+
+    const includeTotal = pageBackup === 1 || totalBackupRef.current === 0;
+
+    void loadHistoryUsage({
+      usageType: "backup",
+      page: pageBackup,
+      includeTotal,
+      silent: false,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    loadedTabs.backup,
+    pageBackup,
+    rowsPerPage,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+    debouncedTabSearches.backup,
+  ]);
+
+  useEffect(() => {
+    if (!loadedTabs.history) return;
+
+    const includeTotal = pageHistory === 1 || totalHistoryRef.current === 0;
+
+    void loadHistoryUsage({
+      usageType: "pic",
+      page: pageHistory,
+      includeTotal,
+      silent: false,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    loadedTabs.history,
+    pageHistory,
+    rowsPerPage,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+    filters.pic,
+    debouncedTabSearches.history,
+  ]);
+
+  useEffect(() => {
+    if (loadedTabs.backup) return;
+
+    void loadHistorySummary({
+      usageType: "backup",
+      silent: true,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    loadedTabs.backup,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+    debouncedTabSearches.backup,
+  ]);
+
+  useEffect(() => {
+    if (loadedTabs.history) return;
+
+    void loadHistorySummary({
+      usageType: "pic",
+      silent: true,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    loadedTabs.history,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+    filters.pic,
+    debouncedTabSearches.history,
+  ]);
+
+  useEffect(() => {
+    setPageAvailable(1);
+    setPageBackup(1);
+    setPageHistory(1);
+  }, [filters.expiry, filters.hostingProvider, filters.project, filters.country, filters.pic]);
+
+  useEffect(() => {
+    setPageAvailable(1);
+  }, [debouncedTabSearches.available]);
+
+  useEffect(() => {
+    setPageBackup(1);
+  }, [debouncedTabSearches.backup]);
+
+  useEffect(() => {
+    setPageHistory(1);
+  }, [debouncedTabSearches.history]);
 
   const refreshInventoryData = async ({
     refreshDomains = true,
@@ -358,12 +686,11 @@ export default function DomainManager() {
     includeTotal = false,
     silent = false,
   }: RefreshInventoryArgs = {}) => {
+    prefetchedPageCacheRef.current.clear();
+
     if (refreshDomains) {
       suggestCacheRef.current.clear();
     }
-
-    if (!silent && refreshDomains) setIsDomainsLoading(true);
-    if (!silent && refreshHistory) setIsHistoryLoading(true);
 
     const jobs: Promise<void>[] = [];
 
@@ -372,56 +699,55 @@ export default function DomainManager() {
     }
 
     if (refreshDomains) {
-      jobs.push(
-        fetch(
-          `/api/domains?${buildInventoryQuery(
-            queryFilters,
-            pageAvailable,
-            rowsPerPage,
-            {
-              status: "available",
-              includeTotal: includeTotal ? "true" : "false",
-            }
-          )}`
-        )
-          .then(async (res) => (res.ok
-            ? res.json() as Promise<PaginatedResponse<DomainItem>>
-            : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
-          .then((data) => {
-            setDomains(data.items);
-            if (typeof data.total === "number") {
-              setTotalAvailable(data.total);
-            }
+      if (loadedTabs.available) {
+        jobs.push(
+          loadAvailableDomains({
+            page: pageAvailable,
+            includeTotal,
+            silent,
           })
-          .finally(() => {
-            if (!silent) setIsDomainsLoading(false);
-          })
-      );
+        );
+      } else {
+        jobs.push(loadAvailableSummary({ silent: true }));
+      }
     }
 
     if (refreshHistory) {
-      jobs.push(
-        fetch(
-          `/api/domain-history?${buildInventoryQuery(
-            queryFilters,
-            pageHistory,
-            rowsPerPage,
-            { includeTotal: includeTotal ? "true" : "false" }
-          )}`
-        )
-          .then(async (res) => (res.ok
-            ? res.json() as Promise<PaginatedResponse<DomainHistoryItem>>
-            : { items: [], total: 0, page: 1, pageSize: rowsPerPage }))
-          .then((data) => {
-            setHistory(data.items);
-            if (typeof data.total === "number") {
-              setTotalHistory(data.total);
-            }
+      if (loadedTabs.backup) {
+        jobs.push(
+          loadHistoryUsage({
+            usageType: "backup",
+            page: pageBackup,
+            includeTotal,
+            silent,
           })
-          .finally(() => {
-            if (!silent) setIsHistoryLoading(false);
+        );
+      } else {
+        jobs.push(
+          loadHistorySummary({
+            usageType: "backup",
+            silent: true,
           })
-      );
+        );
+      }
+
+      if (loadedTabs.history) {
+        jobs.push(
+          loadHistoryUsage({
+            usageType: "pic",
+            page: pageHistory,
+            includeTotal,
+            silent,
+          })
+        );
+      } else {
+        jobs.push(
+          loadHistorySummary({
+            usageType: "pic",
+            silent: true,
+          })
+        );
+      }
     }
 
     await Promise.all(jobs);
@@ -498,7 +824,36 @@ export default function DomainManager() {
   // Derived Data
   // ================================
   const totalPagesAvailable = Math.max(1, Math.ceil(totalAvailable / rowsPerPage));
+  const totalPagesBackup = Math.max(1, Math.ceil(totalBackup / rowsPerPage));
   const totalPagesHistory = Math.max(1, Math.ceil(totalHistory / rowsPerPage));
+  const activeSearch = tabSearches[activeTab];
+  const showBackupTab =
+    isBackupLoading ||
+    totalBackup > 0 ||
+    backupHistory.length > 0 ||
+    activeTab === "backup" ||
+    tabSearches.backup.trim().length > 0;
+
+  const activeTabConfig = {
+    available: {
+      label: "Available",
+      count: totalAvailable,
+      searchPlaceholder: "Search available domains",
+    },
+    backup: {
+      label: "Backup Pending",
+      count: totalBackup,
+      searchPlaceholder: "Search backup domains",
+    },
+    history: {
+      label: "History",
+      count: totalHistory,
+      searchPlaceholder: "Search history or filter PIC",
+    },
+  } satisfies Record<
+    DashboardTab,
+    { label: string; count: number; searchPlaceholder: string }
+  >;
 
 
   // ================================
@@ -516,8 +871,7 @@ export default function DomainManager() {
   const getProviderWarningText = (
     provider: string | null,
     currentHosting: string,
-    pic: string,
-    country: string
+    pic: string
   ) => {
     if (!provider) return "";
 
@@ -544,7 +898,7 @@ export default function DomainManager() {
     const countryValue = searchCountry.trim();
     const picValue = searchPic.trim();
 
-    if (!selectedDomain || !countryValue || !picValue) {
+    if (useMode !== "pic" || !selectedDomain || !countryValue || !picValue) {
       setProviderWarning("");
       return;
     }
@@ -567,8 +921,7 @@ export default function DomainManager() {
           getProviderWarningText(
             payload.lastProvider,
             selectedDomain.hosting,
-            picValue,
-            countryValue
+            picValue
           )
         );
       })
@@ -581,7 +934,7 @@ export default function DomainManager() {
     return () => {
       cancelled = true;
     };
-  }, [currentIndex, matchedDomains, searchCountry, searchPic]);
+  }, [currentIndex, matchedDomains, searchCountry, searchPic, useMode]);
 
 
   // ================================
@@ -589,7 +942,10 @@ export default function DomainManager() {
   // ================================
 
   const setSearch = (v: string) =>
-    setFilters(f => ({ ...f, search: v }));
+    setTabSearches((current) => ({
+      ...current,
+      [activeTab]: v,
+    }));
 
   const setExpiryFilter = (v: DomainFilters["expiry"]) =>
     setFilters(f => ({ ...f, expiry: v }));
@@ -602,6 +958,52 @@ export default function DomainManager() {
 
   const setCountryFilter = (v: string | null) =>
     setFilters(f => ({ ...f, country: v }));
+
+  const setPicFilter = (v: string | null) =>
+    setFilters((f) => ({ ...f, pic: v }));
+
+  const clearActiveTableFilters = () => {
+    setSearch("");
+    setExpiryFilter("all");
+    setHostingProvider(null);
+    setProjectFilter(null);
+    setCountryFilter(null);
+    setPicFilter(null);
+  };
+
+  useEffect(() => {
+    if (activeTab === "backup" && !showBackupTab) {
+      setActiveTab("available");
+    }
+  }, [activeTab, showBackupTab]);
+
+  useEffect(() => {
+    if (activeTab !== "available" || !highlightDomainId || isDomainsLoading) return;
+
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(`domain-${highlightDomainId}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [activeTab, highlightDomainId, isDomainsLoading]);
+
+  useEffect(() => {
+    if (
+      activeTab === "available" ||
+      !highlightHistoryDomainId ||
+      (activeTab === "backup" ? isBackupLoading : isHistoryLoading)
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const el = document.getElementById(`history-domain-${highlightHistoryDomainId}`);
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [activeTab, highlightHistoryDomainId, isBackupLoading, isHistoryLoading]);
 
 
   // ================================
@@ -711,7 +1113,7 @@ export default function DomainManager() {
         refreshDomains: true,
         refreshHistory: false,
         refreshOptions: false,
-        includeTotal: false,
+        includeTotal: true,
       });
     } finally {
       setIsAddingDomain(false);
@@ -744,24 +1146,46 @@ export default function DomainManager() {
   };
 
   const handleGoToDuplicate = () => {
-    if (!duplicateDomain) return; 
-    setFilters((current) => ({
+    if (!duplicateDomain) return;
+
+    const targetTab: DashboardTab =
+      duplicateDomain.status === "available"
+        ? "available"
+        : duplicateDomain.usedForPic?.trim()
+          ? "history"
+          : "backup";
+
+    setActiveTab(targetTab);
+    setExpiryFilter("all");
+    setHostingProvider(null);
+    setProjectFilter(null);
+    setCountryFilter(null);
+    setTabSearches((current) => ({
       ...current,
-      search: duplicateDomain.domain,
+      [targetTab]: duplicateDomain.domain,
     }));
-    setPageAvailable(1);
-    setHighlightDomainId(duplicateDomain.id); 
-    setTimeout(() => { 
-      const el = document.getElementById(`domain-${duplicateDomain.id}`);
-      el?.scrollIntoView({ behavior: "smooth", block: "center" }); }, 100); 
 
-    // clear duplicate warning
-    setDuplicateDomain(null); 
+    if (targetTab === "available") {
+      setPageAvailable(1);
+      setHighlightDomainId(duplicateDomain.id);
+      setHighlightHistoryDomainId(null);
+    } else if (targetTab === "backup") {
+      setPageBackup(1);
+      setHighlightHistoryDomainId(duplicateDomain.id);
+      setHighlightDomainId(null);
+    } else {
+      setPageHistory(1);
+      setHighlightHistoryDomainId(duplicateDomain.id);
+      setHighlightDomainId(null);
+    }
 
-    // remove highlight after 3 seconds 
-    setTimeout(() => { 
-      setHighlightDomainId(null); 
-    }, 5000); };
+    setDuplicateDomain(null);
+
+    window.setTimeout(() => {
+      setHighlightDomainId(null);
+      setHighlightHistoryDomainId(null);
+    }, 5000);
+  };
 
 
   const handleUseDomain = async (id: string) => {
@@ -769,7 +1193,7 @@ export default function DomainManager() {
     try {
       const projectValue = searchProject.trim();
       const requestCountry = capitalizeText(searchCountry.trim());
-      const requestPic = capitalizeText(searchPic.trim());
+      const requestPic = useMode === "pic" ? capitalizeText(searchPic.trim()) : "";
 
       if (!projectValue) {
         setRequestError("Project name is required.");
@@ -781,7 +1205,7 @@ export default function DomainManager() {
         return;
       }
 
-      if (!requestPic) {
+      if (useMode === "pic" && !requestPic) {
         setRequestError("PIC is required before you can use a domain.");
         return;
       }
@@ -795,7 +1219,7 @@ export default function DomainManager() {
           id,
           project: projectValue,
           country: requestCountry,
-          pic: requestPic,
+          pic: requestPic || undefined,
         }),
       });
 
@@ -811,19 +1235,21 @@ export default function DomainManager() {
 
       setRequestError("");
       setSearchCountry(requestCountry);
-      setSearchPic(requestPic);
-      setPicOptions((prev) =>
-        requestPic && !prev.includes(requestPic) ? [...prev, requestPic].sort() : prev
-      );
-      setPicByCountryOptions((prev) => {
-        const currentForCountry = prev[requestCountry] ?? [];
-        if (currentForCountry.includes(requestPic)) return prev;
+      if (requestPic) {
+        setSearchPic(requestPic);
+        setPicOptions((prev) =>
+          !prev.includes(requestPic) ? [...prev, requestPic].sort() : prev
+        );
+        setPicByCountryOptions((prev) => {
+          const currentForCountry = prev[requestCountry] ?? [];
+          if (currentForCountry.includes(requestPic)) return prev;
 
-        return {
-          ...prev,
-          [requestCountry]: [...currentForCountry, requestPic].sort(),
-        };
-      });
+          return {
+            ...prev,
+            [requestCountry]: [...currentForCountry, requestPic].sort(),
+          };
+        });
+      }
       setMatchedDomains([]);
       setCurrentIndex(0);
       setProviderWarning("");
@@ -833,7 +1259,7 @@ export default function DomainManager() {
         refreshDomains: true,
         refreshHistory: true,
         refreshOptions: false,
-        includeTotal: false,
+        includeTotal: true,
       });
     } finally {
       setIsUsingDomain(false);
@@ -958,6 +1384,70 @@ export default function DomainManager() {
     setHistoryActionId(null);
   };
 
+  const handleAssignHistoryPic = async (item: DomainHistoryItem) => {
+    setAssignPicTarget(item);
+    setAssignPicValue(capitalizeText((item.usedForPic ?? "").trim()));
+  };
+
+  const closeAssignPicModal = () => {
+    if (historyActionId) return;
+    setAssignPicTarget(null);
+    setAssignPicValue("");
+  };
+
+  const handleConfirmAssignHistoryPic = async () => {
+    if (!assignPicTarget) return;
+
+    const normalizedPic = capitalizeText(assignPicValue.trim());
+    if (!normalizedPic) {
+      alert("PIC is required.");
+      return;
+    }
+
+    setHistoryActionId(assignPicTarget.id);
+
+    const res = await fetch(`/api/domain-history/${assignPicTarget.id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ pic: normalizedPic }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      setHistoryActionId(null);
+      alert(data.error || "Failed to assign PIC.");
+      return;
+    }
+
+    setPicOptions((prev) =>
+      prev.includes(normalizedPic) ? prev : [...prev, normalizedPic].sort()
+    );
+    if (assignPicTarget.country) {
+      setPicByCountryOptions((prev) => {
+        const current = prev[assignPicTarget.country] ?? [];
+        if (current.includes(normalizedPic)) return prev;
+
+        return {
+          ...prev,
+          [assignPicTarget.country]: [...current, normalizedPic].sort(),
+        };
+      });
+    }
+
+    queueRefresh({
+      refreshDomains: false,
+      refreshHistory: true,
+      refreshOptions: true,
+      includeTotal: true,
+    });
+    setHistoryActionId(null);
+    setAssignPicTarget(null);
+    setAssignPicValue("");
+  };
+
 
   // ================================
   // Edit Domain
@@ -1001,7 +1491,7 @@ export default function DomainManager() {
       queueRefresh({
         refreshDomains: true,
         refreshHistory: false,
-        includeTotal: false,
+        includeTotal: true,
         silent: true,
       });
     })().catch((error) => {
@@ -1030,314 +1520,466 @@ export default function DomainManager() {
         Domain Inventory Manager
       </h1>
 
-      {/* Record Domain */}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+        <Card title="Record purchased domain">
+          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+            <Input
+              ref={domainRef}
+              placeholder="example.com"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  focusNext(hostingRef);
+                }
+              }}
+            />
 
-      <Card title="1. Record purchased domain">
-        <div className="grid gap-5 md:grid-cols-3">
+            <SmartDropdown
+              ref={hostingRef}
+              value={hosting}
+              setValue={(value) => setHosting(capitalizeText(value))}
+              options={hostingOptions}
+              setOptions={setHostingOptions}
+              placeholder="Hosting provider"
+            />
 
-          <Input
-            ref={domainRef}
-            placeholder="example.com"
-            value={domain}
-            onChange={(e) => setDomain(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                focusNext(hostingRef);
-              }
-            }}
-          />
+            <Input
+              ref={expiryRef}
+              type="text"
+              value={expiry}
+              placeholder="YYYY-MM-DD or DD/MM/YYYY"
+              onChange={(e) => setExpiry(normalizeExpiryInput(e.target.value))}
+            />
 
-          <SmartDropdown
-            ref={hostingRef}
-            value={hosting}
-            setValue={(value) => setHosting(capitalizeText(value))}
-            options={hostingOptions}
-            setOptions={setHostingOptions}
-            placeholder="Hosting provider"
-          />
+            <SmartDropdown
+              value={account}
+              setValue={(value) => setAccount(capitalizeText(value))}
+              options={accountOptions}
+              setOptions={setAccountOptions}
+              placeholder="Account"
+            />
 
-          <Input
-            ref={expiryRef}
-            type="text"
-            value={expiry}
-            placeholder="YYYY-MM-DD or DD/MM/YYYY"
-            onChange={(e) => setExpiry(normalizeExpiryInput(e.target.value))}
-          />
+            <SmartDropdown
+              value={project}
+              setValue={(value) => setProject(capitalizeText(value))}
+              options={projectOptions}
+              setOptions={setProjectOptions}
+              placeholder="Project Name"
+            />
 
-          <SmartDropdown
-            value={account}
-            setValue={(value) => setAccount(capitalizeText(value))}
-            options={accountOptions}
-            setOptions={setAccountOptions}
-            placeholder="Account"
-          />
+            <SmartDropdown
+              value={country}
+              setValue={(value) => setCountry(capitalizeText(value))}
+              options={countryOptions}
+              setOptions={setCountryOptions}
+              placeholder="Country"
+            />
+          </div>
 
-          <SmartDropdown
-            value={project}
-            setValue={(value) => setProject(capitalizeText(value))}
-            options={projectOptions}
-            setOptions={setProjectOptions}
-            placeholder="Project Name"
-          />
+          {duplicateDomain && (
+            <div className="mt-4 flex items-center justify-between rounded-lg border border-red-800 bg-red-950/40 p-4">
+              <div className="text-sm text-red-300">
+                ⚠ Domain <b>{duplicateDomain.domain}</b> already exists in inventory.
+              </div>
 
-          <SmartDropdown
-            value={country}
-            setValue={(value) => setCountry(capitalizeText(value))}
-            options={countryOptions}
-            setOptions={setCountryOptions}
-            placeholder="Country"
-          />
-
-        </div>
-
-        {duplicateDomain && (
-          <div className="mt-4 rounded-lg border border-red-800 bg-red-950/40 p-4 flex items-center justify-between">
-            <div className="text-sm text-red-300">
-              ⚠ Domain <b>{duplicateDomain.domain}</b> already exists in inventory.
+              <Button variant="secondary" onClick={handleGoToDuplicate}>
+                Go to existing
+              </Button>
             </div>
+          )}
+
+          <div className="mt-6 flex justify-end">
+            <Button
+              onClick={handleAddDomain}
+              disabled={isAddingDomain || isOptionsLoading}
+            >
+              {isAddingDomain ? "Adding..." : "Add domain"}
+            </Button>
+          </div>
+        </Card>
+
+        <Card title="Request / suggest domain">
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setUseMode("pic");
+                if (requestError) setRequestError("");
+              }}
+              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                useMode === "pic"
+                  ? "border-violet-500/50 bg-violet-500/15 text-zinc-50"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+              }`}
+            >
+              Assign PIC
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setUseMode("backup");
+                setSearchPic("");
+                setProviderWarning("");
+                if (requestError) setRequestError("");
+              }}
+              className={`rounded-full border px-3 py-1.5 text-sm transition ${
+                useMode === "backup"
+                  ? "border-amber-500/50 bg-amber-500/10 text-amber-100"
+                  : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:bg-zinc-800"
+              }`}
+            >
+              No PIC
+            </button>
+          </div>
+
+          <div className={`grid gap-4 ${useMode === "backup" ? "md:grid-cols-2" : "md:grid-cols-2 xl:grid-cols-3"}`}>
+            <Input
+              placeholder="Project"
+              value={searchProject}
+              onChange={(e) => {
+                setSearchProject(capitalizeText(e.target.value));
+                if (requestError) setRequestError("");
+              }}
+            />
+
+            <Input
+              placeholder="Country"
+              value={searchCountry}
+              onChange={(e) => {
+                setSearchCountry(capitalizeText(e.target.value));
+                if (requestError) setRequestError("");
+              }}
+              required
+            />
+
+            {useMode === "pic" ? (
+              <SmartDropdown
+                value={searchPic}
+                setValue={(value) => {
+                  setSearchPic(capitalizeText(value));
+                  if (requestError) setRequestError("");
+                }}
+                options={filteredPicOptions}
+                setOptions={setPicOptions}
+                placeholder="PIC"
+              />
+            ) : null}
+          </div>
+
+          <p className="mt-3 text-xs text-zinc-500">
+            {useMode === "backup"
+              ? "Backup keeps the domain in Backup Pending so PIC can be assigned later."
+              : "Assign a PIC now to record the domain directly into final history."}
+          </p>
+
+          <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <label className="flex items-center gap-2 text-sm text-zinc-400">
+              <input
+                type="checkbox"
+                disabled={!searchCountry}
+                checked={strictCountry}
+                onChange={(e) => setStrictCountry(e.target.checked)}
+              />
+              Exact country match only
+            </label>
 
             <Button
               variant="secondary"
-              onClick={handleGoToDuplicate}
+              onClick={() => void handleSuggestDomain()}
+              disabled={isSuggestingDomain}
             >
-              Go to existing
+              {isSuggestingDomain ? "Finding..." : "Suggest domain"}
             </Button>
           </div>
-        )}
 
-        <div className="mt-6 flex justify-end">
-          <Button
-            onClick={handleAddDomain}
-            disabled={isAddingDomain || isOptionsLoading}
-          >
-            {isAddingDomain ? "Adding..." : "Add domain"}
-          </Button>
-        </div>
-      </Card>
+          {requestError && (
+            <p className="mt-3 text-sm text-red-400">
+              {requestError}
+            </p>
+          )}
 
-      {/* Request Domain */}
+          {matchedDomains.length > 0 && (
+            <div className="mt-6 rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
+              <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between">
+                <div className="space-y-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                    Suggested domain
+                  </p>
 
-    <Card title="2. Request domain for project">
-      <div className="grid gap-4 md:grid-cols-3">
+                  <div className="space-y-3">
+                    <p className="text-3xl font-semibold tracking-tight text-zinc-50">
+                      {matchedDomains[currentIndex].domain}
+                    </p>
 
-        <Input
-          placeholder="Project Name"
-          value={searchProject}
-          onChange={(e) => {
-            setSearchProject(capitalizeText(e.target.value));
-            if (requestError) setRequestError("");
-          }}
-        />
+                    <div className="space-y-2 text-sm text-zinc-300">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
+                          Hosting
+                        </span>
+                        <span className="text-sm text-zinc-200">
+                          {matchedDomains[currentIndex].hosting || "-"}
+                        </span>
+                      </div>
 
-        <Input
-          placeholder="Country"
-          value={searchCountry}
-          onChange={(e) => {
-            setSearchCountry(capitalizeText(e.target.value));
-            if (requestError) setRequestError("");
-          }}
-          required
-        />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-sky-300">
+                          Account
+                        </span>
+                        <span className="text-sm text-zinc-200">
+                          {matchedDomains[currentIndex].account || "-"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-        <SmartDropdown
-          value={searchPic}
-          setValue={(value) => {
-            setSearchPic(capitalizeText(value));
-            if (requestError) setRequestError("");
-          }}
-          options={filteredPicOptions}
-          setOptions={setPicOptions}
-          placeholder="PIC"
-        />
+                  <p className="text-xs font-medium tracking-wide text-zinc-500">
+                    {currentIndex + 1} / {matchedDomains.length}
+                  </p>
 
-      </div>
+                  {providerWarning && (
+                    <div
+                      role="alert"
+                      className="mt-2 w-full rounded-xl border border-amber-400/45 bg-gradient-to-r from-amber-500/15 to-orange-500/15 p-3 shadow-[0_0_0_1px_rgba(251,191,36,0.15)]"
+                    >
+                      <div className="flex items-start gap-3">
+                        <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-300/20 text-amber-200">
+                          <svg
+                            aria-hidden="true"
+                            viewBox="0 0 24 24"
+                            className="h-4 w-4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M12 9v4" />
+                            <path d="M12 17h.01" />
+                            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                          </svg>
+                        </span>
 
-      {requestError && (
-        <p className="mt-3 text-sm text-red-400">
-          {requestError}
-        </p>
-      )}
-
-      <div className="mt-4 flex justify-end">
-        <Button
-          variant="secondary"
-          onClick={() => void handleSuggestDomain()}
-          disabled={isSuggestingDomain}
-        >
-          {isSuggestingDomain ? "Finding..." : "Suggest domain"}
-        </Button>
-      </div>
-
-      <label className="mt-3 flex items-center gap-2 text-sm text-zinc-400">
-        <input
-          type="checkbox"
-          disabled={!searchCountry}
-          checked={strictCountry}
-          onChange={(e) => setStrictCountry(e.target.checked)}
-        />
-        Exact country match only
-      </label>
-
-      {/* Suggested result */}
-      {matchedDomains.length > 0 && (
-        <div className="mt-6 rounded-xl border border-zinc-800 bg-gradient-to-br from-zinc-900 to-zinc-950 p-5 shadow-[0_0_0_1px_rgba(255,255,255,0.02)]">
-          <p className="mb-3 text-sm font-medium tracking-wide text-zinc-400">
-            Suggested domain
-          </p>
-
-          <div className="flex items-center justify-between">
-            <div className="space-y-3">
-              <p className="text-3xl font-semibold tracking-tight text-zinc-50">
-                {matchedDomains[currentIndex].domain}
-              </p>
-
-              <div className="space-y-2 text-sm text-zinc-300">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
-                    Hosting
-                  </span>
-                  <span className="text-sm text-zinc-200">
-                    {matchedDomains[currentIndex].hosting || "-"}
-                  </span>
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200/90">
+                            Provider Warning
+                          </p>
+                          <p className="text-sm leading-6 text-amber-100">
+                            {providerWarning}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-sky-300">
-                    Account
-                  </span>
-                  <span className="text-sm text-zinc-200">
-                    {matchedDomains[currentIndex].account || "-"}
-                  </span>
+                <div className="flex gap-2 self-start xl:self-center">
+                  <Button variant="secondary" onClick={handlePrevDomain}>
+                    Back
+                  </Button>
+
+                  <Button variant="secondary" onClick={handleNextDomain}>
+                    Next
+                  </Button>
+
+                  <Button
+                    onClick={() => handleUseDomain(matchedDomains[currentIndex].id)}
+                    disabled={isUsingDomain || (useMode === "pic" && !searchPic.trim())}
+                  >
+                    {isUsingDomain ? "Using..." : useMode === "backup" ? "Use as backup" : "Use"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      <Card title="Domain data">
+        <div className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
+            <div className="space-y-2">
+              {(["available", "backup", "history"] as DashboardTab[])
+                .filter((tab) => tab !== "backup" || showBackupTab)
+                .map((tab) => {
+                  const isActive = activeTab === tab;
+                  const tabConfig = activeTabConfig[tab];
+
+                  return (
+                    <button
+                      key={tab}
+                      type="button"
+                      onClick={() => setActiveTab(tab)}
+                      className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition ${
+                        isActive
+                          ? "border-violet-500/50 bg-violet-500/12 text-zinc-50 shadow-[0_0_0_1px_rgba(139,92,246,0.15)]"
+                          : "border-zinc-800 bg-zinc-900/70 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900"
+                      }`}
+                    >
+                      <span className="font-medium">{tabConfig.label}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-xs ${
+                          isActive
+                            ? "bg-violet-400/20 text-violet-100"
+                            : "bg-zinc-800 text-zinc-400"
+                        }`}
+                      >
+                        {tabConfig.count}
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+          </aside>
+
+          <div className="min-w-0">
+            <div className="mb-6 rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+              <div className="mb-3 flex items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-100">
+                    {activeTabConfig[activeTab].label}
+                  </p>
+                  <p className="text-xs text-zinc-500">
+                    {activeTab === "available"
+                      ? "Available inventory ready for assignment."
+                      : activeTab === "backup"
+                        ? "Taken domains waiting for PIC assignment."
+                        : "Final usage history with PIC assigned."}
+                  </p>
                 </div>
               </div>
 
-              <p className="text-xs font-medium tracking-wide text-zinc-500">
-                {currentIndex + 1} / {matchedDomains.length}
-              </p>
-
-              {providerWarning && (
-                <div
-                  role="alert"
-                  className="mt-2 w-full rounded-xl border border-amber-400/45 bg-gradient-to-r from-amber-500/15 to-orange-500/15 p-3 shadow-[0_0_0_1px_rgba(251,191,36,0.15)]"
-                >
-                  <div className="flex items-start gap-3">
-                    <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-300/20 text-amber-200">
-                      <svg
-                        aria-hidden="true"
-                        viewBox="0 0 24 24"
-                        className="h-4 w-4"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M12 9v4" />
-                        <path d="M12 17h.01" />
-                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                      </svg>
-                    </span>
-
-                    <div className="space-y-1">
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-200/90">
-                        Provider Warning
-                      </p>
-                      <p className="text-sm leading-6 text-amber-100">
-                        {providerWarning}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <FilterBar
+                hostingOptions={hostingOptions}
+                projectOptions={projectOptions}
+                countryOptions={countryOptions}
+                picOptions={picOptions}
+                filters={filters}
+                searchValue={activeSearch}
+                searchPlaceholder={activeTabConfig[activeTab].searchPlaceholder}
+                setSearch={setSearch}
+                setExpiry={setExpiryFilter}
+                setHostingProvider={setHostingProvider}
+                setProject={setProjectFilter}
+                setCountry={setCountryFilter}
+                setPic={setPicFilter}
+                showPicFilter={activeTab === "history"}
+                onClear={clearActiveTableFilters}
+              />
             </div>
 
-            <div className="flex gap-2">
+            {activeTab === "available" ? (
+              <DomainTable
+                title="Available domains"
+                domains={domains}
+                page={pageAvailable}
+                totalPages={totalPagesAvailable}
+                totalItems={totalAvailable}
+                rowsPerPage={rowsPerPage}
+                isLoading={isDomainsLoading}
+                onPrev={() => setPageAvailable((p) => Math.max(p - 1, 1))}
+                onNext={() => setPageAvailable((p) => Math.min(p + 1, totalPagesAvailable))}
+                editingId={editingId}
+                editDomain={editDomain}
+                highlightDomainId={highlightDomainId}
+                hostingOptions={hostingOptions}
+                accountOptions={accountOptions}
+                projectOptions={projectOptions}
+                countryOptions={countryOptions}
+                setHostingOptions={setHostingOptions}
+                setAccountOptions={setAccountOptions}
+                setProjectOptions={setProjectOptions}
+                setCountryOptions={setCountryOptions}
+                setEditDomain={setEditDomain}
+                handleEdit={handleEdit}
+                handleSave={handleSave}
+                handleDeleteDomain={handleDeleteDomain}
+                setEditingId={setEditingId}
+              />
+            ) : activeTab === "backup" ? (
+              <HistoryTable
+                title="Backup pending"
+                emptyLabel="No backup pending rows found."
+                highlightDomainId={highlightHistoryDomainId}
+                histories={backupHistory}
+                page={pageBackup}
+                totalPages={totalPagesBackup}
+                totalItems={totalBackup}
+                rowsPerPage={rowsPerPage}
+                isLoading={isBackupLoading}
+                onPrev={() => setPageBackup((p) => Math.max(p - 1, 1))}
+                onNext={() => setPageBackup((p) => Math.min(p + 1, totalPagesBackup))}
+                historyActionId={historyActionId}
+                onAssignPic={handleAssignHistoryPic}
+                onUndoHistory={handleUndoHistory}
+                onDeleteHistory={handleDeleteHistory}
+              />
+            ) : (
+              <HistoryTable
+                title="History"
+                emptyLabel="No history rows found."
+                highlightDomainId={highlightHistoryDomainId}
+                histories={finalHistory}
+                page={pageHistory}
+                totalPages={totalPagesHistory}
+                totalItems={totalHistory}
+                rowsPerPage={rowsPerPage}
+                isLoading={isHistoryLoading}
+                onPrev={() => setPageHistory((p) => Math.max(p - 1, 1))}
+                onNext={() => setPageHistory((p) => Math.min(p + 1, totalPagesHistory))}
+                historyActionId={historyActionId}
+                onUndoHistory={handleUndoHistory}
+                onDeleteHistory={handleDeleteHistory}
+              />
+            )}
+          </div>
+        </div>
+      </Card>
+
+      {assignPicTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-zinc-100">
+              Assign PIC
+            </h3>
+            <p className="mt-1 text-sm text-zinc-400">
+              {assignPicTarget.domain}
+            </p>
+
+            <div className="mt-4">
+              <Input
+                value={assignPicValue}
+                placeholder="PIC"
+                onChange={(e) => setAssignPicValue(capitalizeText(e.target.value))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void handleConfirmAssignHistoryPic();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
               <Button
                 variant="secondary"
-                onClick={handlePrevDomain}
+                onClick={closeAssignPicModal}
+                disabled={Boolean(historyActionId)}
               >
-                Back
+                Cancel
               </Button>
-
               <Button
-                variant="secondary"
-                onClick={handleNextDomain}
+                onClick={() => void handleConfirmAssignHistoryPic()}
+                disabled={Boolean(historyActionId)}
               >
-                Next
-              </Button>
-
-              <Button
-                onClick={() =>
-                  handleUseDomain(matchedDomains[currentIndex].id)
-                }
-                disabled={isUsingDomain || !searchPic.trim()}
-              >
-                {isUsingDomain ? "Using..." : "Use"}
+                {historyActionId ? "Saving..." : "Save PIC"}
               </Button>
             </div>
           </div>
         </div>
-      )}
-    </Card>
-
-      <FilterBar
-        hostingOptions={hostingOptions}
-        projectOptions={projectOptions}
-        countryOptions={countryOptions}
-        filters={filters}
-        setSearch={setSearch}
-        setExpiry={setExpiryFilter}
-        setHostingProvider={setHostingProvider}
-        setProject={setProjectFilter}
-        setCountry={setCountryFilter}
-      />
-
-
-      {/* Tables */}
-
-      <DomainTable
-        domains={domains}
-        page={pageAvailable}
-        totalPages={totalPagesAvailable}
-        totalItems={totalAvailable}
-        rowsPerPage={rowsPerPage}
-        isLoading={isDomainsLoading}
-        onPrev={() => setPageAvailable(p => Math.max(p - 1, 1))}
-        onNext={() => setPageAvailable(p => Math.min(p + 1, totalPagesAvailable))}
-        editingId={editingId}
-        editDomain={editDomain}
-        highlightDomainId={highlightDomainId}
-        duplicateDomain={duplicateDomain}
-        hostingOptions={hostingOptions}
-        accountOptions={accountOptions}
-        projectOptions={projectOptions}
-        countryOptions={countryOptions}
-        setHostingOptions={setHostingOptions}
-        setAccountOptions={setAccountOptions}
-        setProjectOptions={setProjectOptions}
-        setCountryOptions={setCountryOptions}
-        setEditDomain={setEditDomain}
-        handleEdit={handleEdit}
-        handleSave={handleSave}
-        handleDeleteDomain={handleDeleteDomain}
-        handleGoToDuplicate={handleGoToDuplicate}
-        setEditingId={setEditingId}
-      />
-
-      <HistoryTable
-        histories={history}
-        page={pageHistory}
-        totalPages={totalPagesHistory}
-        totalItems={totalHistory}
-        rowsPerPage={rowsPerPage}
-        isLoading={isHistoryLoading}
-        onPrev={() => setPageHistory(p => Math.max(p - 1, 1))}
-        onNext={() => setPageHistory(p => Math.min(p + 1, totalPagesHistory))}
-        historyActionId={historyActionId}
-        onUndoHistory={handleUndoHistory}
-        onDeleteHistory={handleDeleteHistory}
-      />
+      ) : null}
     </>
   );
 }
