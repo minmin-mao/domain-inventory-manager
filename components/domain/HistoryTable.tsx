@@ -1,11 +1,12 @@
 "use client";
 
 import Button from "@/components/Button";
-import Card from "@/components/Card";
-import { getDaysLeft } from "@/lib/domain/domainUtils";
 import type { DomainHistoryItem } from "@/lib/domain/domainTypes";
 
 type Props = {
+  title?: string;
+  emptyLabel?: string;
+  highlightDomainId?: string | null;
   page: number;
   totalPages: number;
   totalItems: number;
@@ -15,11 +16,15 @@ type Props = {
   onNext: () => void;
   histories: DomainHistoryItem[];
   historyActionId: string | null;
+  onAssignPic?: (item: DomainHistoryItem) => void | Promise<void>;
   onUndoHistory: (item: DomainHistoryItem) => void | Promise<void>;
   onDeleteHistory: (item: DomainHistoryItem) => void | Promise<void>;
 };
 
 export default function HistoryTable({
+  title,
+  emptyLabel = "No history records found.",
+  highlightDomainId = null,
   page,
   totalPages,
   totalItems,
@@ -29,11 +34,17 @@ export default function HistoryTable({
   onNext,
   histories,
   historyActionId,
+  onAssignPic,
   onUndoHistory,
   onDeleteHistory,
 }: Props) {
   return (
-    <Card title="4. History sheet">
+    <div>
+      {title ? (
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">{title}</h3>
+        </div>
+      ) : null}
       <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
         <table className="w-full text-sm">
           <thead className="bg-zinc-950 text-zinc-400">
@@ -42,11 +53,11 @@ export default function HistoryTable({
               <th className="px-4 py-3 text-left">Domain</th>
               <th className="px-4 py-3 text-left">Status</th>
               <th className="px-4 py-3 text-left">Hosting</th>
+              <th className="px-4 py-3 text-left">Account</th>
               <th className="px-4 py-3 text-left">Project</th>
               <th className="px-4 py-3 text-left">Country</th>
               <th className="px-4 py-3 text-left">PIC</th>
-              <th className="px-4 py-3 text-left">Expiry</th>
-              <th className="px-4 py-3 text-left">Days Left</th>
+              <th className="px-4 py-3 text-left">Used At</th>
               <th className="px-4 py-3 text-left">Actions</th>
             </tr>
           </thead>
@@ -61,50 +72,88 @@ export default function HistoryTable({
                   Loading history...
                 </td>
               </tr>
+            ) : histories.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={10}
+                  className="px-4 py-10 text-center text-sm text-zinc-500"
+                >
+                  {emptyLabel}
+                </td>
+              </tr>
             ) : (
               histories.map((item, index) => {
-                const daysLeft = getDaysLeft(item.expiry ?? undefined);
                 const isBusy = historyActionId === item.id;
+                const isBackup = item.usageType === "backup";
+                const statusLabel = isBackup ? "backup" : item.status;
 
                 return (
-                  <tr key={item.id} className="hover:bg-zinc-800/40 transition">
+                  <tr
+                    key={item.id}
+                    id={`history-domain-${item.domainId}`}
+                    className={`transition ${
+                      highlightDomainId === item.domainId
+                        ? "bg-blue-500/10"
+                        : "hover:bg-zinc-800/40"
+                    }`}
+                  >
                     <td className="px-4 py-3">{index + 1}</td>
                     <td className="px-4 py-3 font-medium">{item.domain}</td>
                     <td className="px-4 py-3">
-                      <span className="rounded-full bg-red-800/15 px-2 py-1 text-xs text-red-400">
-                        {item.status}
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs ${
+                          isBackup
+                            ? "bg-sky-500/15 text-sky-300"
+                            : "bg-red-800/15 text-red-400"
+                        }`}
+                      >
+                        {statusLabel}
                       </span>
                     </td>
                     <td className="px-4 py-3">{item.hosting}</td>
+                    <td className="px-4 py-3">{item.account}</td>
                     <td className="px-4 py-3">{item.project}</td>
                     <td className="px-4 py-3 text-zinc-400">{item.country || "-"}</td>
                     <td className="px-4 py-3 text-zinc-300">{item.usedForPic || "-"}</td>
                     <td className="px-4 py-3">
-                      {item.expiry
-                        ? new Date(item.expiry).toISOString().split("T")[0]
-                        : "-"}
+                      {new Date(item.createdAt).toLocaleString("en-GB", {
+                        year: "numeric",
+                        month: "short",
+                        day: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
                     </td>
                     <td className="px-4 py-3">
-                      {daysLeft !== null ? `${daysLeft} days` : "-"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.canUndo ? (
-                        <Button
-                          variant="secondary"
-                          disabled={isBusy}
-                          onClick={() => onUndoHistory(item)}
-                        >
-                          {isBusy ? "Undoing..." : "Undo"}
-                        </Button>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          disabled={isBusy || item.id.startsWith("legacy-")}
-                          onClick={() => onDeleteHistory(item)}
-                        >
-                          {isBusy ? "Deleting..." : "Delete"}
-                        </Button>
-                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {isBackup && onAssignPic ? (
+                          <Button
+                            variant="secondary"
+                            disabled={isBusy || item.id.startsWith("legacy-")}
+                            onClick={() => onAssignPic(item)}
+                          >
+                            {isBusy ? "Saving..." : "Assign PIC"}
+                          </Button>
+                        ) : null}
+
+                        {item.canUndo ? (
+                          <Button
+                            variant="secondary"
+                            disabled={isBusy}
+                            onClick={() => onUndoHistory(item)}
+                          >
+                            {isBusy ? "Undoing..." : "Undo"}
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            disabled={isBusy || item.id.startsWith("legacy-")}
+                            onClick={() => onDeleteHistory(item)}
+                          >
+                            {isBusy ? "Deleting..." : "Delete"}
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -141,6 +190,6 @@ export default function HistoryTable({
           </div>
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

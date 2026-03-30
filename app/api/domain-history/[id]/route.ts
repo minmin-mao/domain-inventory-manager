@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { capitalizeText } from "@/lib/domain/textUtils";
 import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
 import { NextResponse } from "next/server";
 
@@ -11,8 +12,13 @@ type DomainHistoryDelegate = {
     id: string;
     domainId: string;
     createdAt: Date;
+    usedForPic?: string | null;
   } | null>;
   delete: (args: { where: { id: string } }) => Promise<unknown>;
+  update?: (args: {
+    where: { id: string };
+    data: { usedForPic: string };
+  }) => Promise<unknown>;
 };
 
 function getHistoryDelegate() {
@@ -22,13 +28,64 @@ function getHistoryDelegate() {
 }
 
 export async function PATCH(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   const historyDelegate = getHistoryDelegate();
   const isLegacyRow = id.startsWith("legacy-");
   const domainId = isLegacyRow ? id.replace(/^legacy-/, "") : null;
+  const rawBody = await req.text();
+  const body = rawBody ? JSON.parse(rawBody) as { pic?: string } : {};
+  const requestedPic =
+    typeof body.pic === "string" && body.pic.trim()
+      ? capitalizeText(body.pic.trim())
+      : null;
+
+  if (requestedPic) {
+    if (!historyDelegate || isLegacyRow) {
+      return NextResponse.json(
+        { error: "PIC assignment is unavailable for this row." },
+        { status: 400 }
+      );
+    }
+
+    const historyRow = await historyDelegate.findUnique({
+      where: { id },
+    });
+
+    if (!historyRow) {
+      return NextResponse.json({ error: "History row not found" }, { status: 404 });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const txHistoryDelegate = (tx as typeof tx & {
+        domainHistory?: DomainHistoryDelegate;
+      }).domainHistory;
+
+      await tx.domain.update({
+        where: { id: historyRow.domainId },
+        data: {
+          usedForPic: requestedPic,
+        },
+      });
+
+      await txHistoryDelegate?.update?.({
+        where: { id: historyRow.id },
+        data: { usedForPic: requestedPic },
+      });
+    });
+
+    notifyInventoryUpdated({
+      source: "history",
+      refreshDomains: false,
+      refreshHistory: true,
+      refreshOptions: true,
+      includeTotal: true,
+    });
+
+    return NextResponse.json({ success: true });
+  }
 
   if (!historyDelegate && !isLegacyRow) {
     return NextResponse.json(

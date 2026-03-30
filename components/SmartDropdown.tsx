@@ -20,6 +20,7 @@ type Props = {
   setOptions?: React.Dispatch<React.SetStateAction<string[]>>;
   placeholder?: string;
   isClearable?: boolean;
+  isDisabled?: boolean;
   onChange?: (value: string | null) => void;
 };
 
@@ -48,6 +49,11 @@ const customStyles: StylesConfig<Option, false> = {
     ...base,
     color: "#e4e4e7",
   }),
+  placeholder: (base) => ({
+    ...base,
+    color: "#71717a",
+    fontSize: "0.75rem",
+  }),
   dropdownIndicator: (base) => ({
     ...base,
     color: "#9ca3af",
@@ -59,7 +65,7 @@ const customStyles: StylesConfig<Option, false> = {
 
 const SmartDropdown = forwardRef<SelectInstance<Option, false>, Props>(
   (
-    { value, setValue, options, setOptions, placeholder, isClearable, onChange },
+    { value, setValue, options, setOptions, placeholder, isClearable, isDisabled, onChange },
     ref
   ) => {
     const [inputValue, setInputValue] = useState("");
@@ -97,12 +103,14 @@ const SmartDropdown = forwardRef<SelectInstance<Option, false>, Props>(
         isClearable={isClearable}
         onInputChange={handleInputChange}
         onBlur={() => {
+          if (isDisabled) return;
           const trimmed = inputValue.trim();
           if (!trimmed) return;
           handleChange({ label: trimmed, value: trimmed });
           setInputValue("");
         }}
         placeholder={placeholder}
+        isDisabled={isDisabled}
         value={value ? { label: value, value } : null}
       />
     );

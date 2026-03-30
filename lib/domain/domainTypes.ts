@@ -29,12 +29,14 @@ export type DomainHistoryItem = {
   domainId: string
   domain: string
   hosting: string
+  account: string
   expiry: string | null
   project: string
   country: string
   usedForPic?: string
   createdAt: string
   status: "taken"
+  usageType?: "backup" | "pic"
   canUndo: boolean
 }
 
@@ -46,6 +48,7 @@ export type DomainFilters = {
   hostingProvider: string | null;
   project: string | null;
   country: string | null;
+  pic?: string | null;
 }
 
 export type PaginatedResponse<T> = {

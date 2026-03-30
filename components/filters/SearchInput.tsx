@@ -23,7 +23,7 @@ export function SearchInput({ value, onChange, placeholder = 'Search domains...'
       value={local}
       onChange={(e) => setLocal(e.target.value)}
       placeholder={placeholder}
-      className="px-3 py-2 border rounded w-full md:w-72 focus:outline-none focus:ring"
+      className="w-full rounded border px-3 py-2 text-sm placeholder:text-xs placeholder:text-zinc-500 focus:outline-none focus:ring md:w-72"
       aria-label="Search domains"
     />
   );

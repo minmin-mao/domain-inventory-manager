@@ -8,24 +8,36 @@ type Props = {
   hostingOptions: string[];
   projectOptions: string[];
   countryOptions: string[];
+  picOptions?: string[];
   filters: DomainFilters;
+  searchValue: string;
+  searchPlaceholder?: string;
   setSearch: (v: string) => void
   setExpiry: (v: 'all' | 'le30' | 'le60' | 'expired') => void;
   setHostingProvider: (v: string | null) => void;
   setProject: (v: string | null) => void;
   setCountry: (v: string | null) => void;
+  setPic?: (v: string | null) => void;
+  showPicFilter?: boolean;
+  onClear: () => void;
 }
 
 export function FilterBar({
   hostingOptions,
   projectOptions,
   countryOptions,
+  picOptions = [],
   filters,
+  searchValue,
+  searchPlaceholder = "Search domains...",
   setSearch,
   setExpiry,
   setHostingProvider,
   setProject,
   setCountry,
+  setPic,
+  showPicFilter = false,
+  onClear,
 }: Props) {
 
   return (
@@ -35,7 +47,11 @@ export function FilterBar({
         {/* Search */}
         <div className="flex flex-col gap-1">
           <label className="text-xs text-zinc-400">Search</label>
-          <SearchInput value={filters.search} onChange={setSearch} />
+          <SearchInput
+            value={searchValue}
+            onChange={setSearch}
+            placeholder={searchPlaceholder}
+          />
         </div>
 
         {/* Expiry */}
@@ -77,16 +93,22 @@ export function FilterBar({
           />
         </div>
 
+        {showPicFilter && setPic ? (
+          <div className="flex flex-col gap-1 w-44">
+            <label className="text-xs text-zinc-400">PIC</label>
+            <DropdownFilter
+              value={filters.pic ?? null}
+              onChange={setPic}
+              options={picOptions}
+              placeholder="All PIC"
+            />
+          </div>
+        ) : null}
+
         {/* Clear button */}
         <div className="ml-auto">
           <button
-            onClick={() => {
-              setSearch("");
-              setExpiry("all");
-              setHostingProvider(null);
-              setProject(null);
-              setCountry(null);
-            }}
+            onClick={onClear}
             className="rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800 transition"
           >
             Clear filters

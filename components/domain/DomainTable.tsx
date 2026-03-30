@@ -1,9 +1,8 @@
-import Card from "@/components/Card";
-import Button from "@/components/Button";
 import type { DomainItem } from "@/lib/domain/domainTypes";
 import DomainRow from "./DomainRow";
 
 type Props = {
+  title?: string;
   page: number
   totalPages: number
   totalItems: number
@@ -15,7 +14,6 @@ type Props = {
   domains: DomainItem[];
   editingId: string | null;
   editDomain: DomainItem | null;
-  duplicateDomain: DomainItem | null;
   highlightDomainId: string | null;
 
   hostingOptions: string[];
@@ -32,12 +30,12 @@ type Props = {
   handleEdit: (item: DomainItem) => void;
   handleSave: () => void;
   handleDeleteDomain: (id: string) => void;
-  handleGoToDuplicate: () => void;
   setEditingId: (id: string | null) => void;
 };
 
 export default function DomainTable(props: Props) {
   const {
+    title,
     page,
     totalPages,
     totalItems,
@@ -46,7 +44,6 @@ export default function DomainTable(props: Props) {
     onPrev,
     onNext,
     domains,
-    duplicateDomain,
     highlightDomainId,
     editingId,
     editDomain,
@@ -62,25 +59,16 @@ export default function DomainTable(props: Props) {
     handleEdit,
     handleSave,
     handleDeleteDomain,
-    handleGoToDuplicate,
     setEditingId
   } = props;
 
   return (
-    <Card title="3. Domain sheet">
-      {/* Duplicate warning */}
-      {/* {duplicateDomain && (
-        <div className="mb-4 flex items-center justify-between rounded-lg p-3 text-sm text-yellow-400">
-          <span>
-            ⚠ Domain {duplicateDomain.domain} already exists in inventory.
-          </span>
-
-          <Button variant="secondary" onClick={handleGoToDuplicate}>
-            Go to existing
-          </Button>
+    <div>
+      {title ? (
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-zinc-100">{title}</h3>
         </div>
-      )} */}
-
+      ) : null}
       <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
         <table className="w-full text-sm">
           <thead className="bg-zinc-950 text-zinc-400">
@@ -106,6 +94,15 @@ export default function DomainTable(props: Props) {
                   className="px-4 py-10 text-center text-sm text-zinc-400"
                 >
                   Loading domains...
+                </td>
+              </tr>
+            ) : domains.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={10}
+                  className="px-4 py-10 text-center text-sm text-zinc-500"
+                >
+                  No available domains found.
                 </td>
               </tr>
             ) : (
@@ -164,6 +161,6 @@ export default function DomainTable(props: Props) {
 
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

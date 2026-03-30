@@ -65,6 +65,7 @@ const buildWhere = (searchParams: URLSearchParams): Prisma.DomainWhereInput => {
             { domain: { contains: search, mode: "insensitive" } },
             { project: { contains: search, mode: "insensitive" } },
             { hosting: { contains: search, mode: "insensitive" } },
+            { account: { contains: search, mode: "insensitive" } },
             { country: { contains: search, mode: "insensitive" } },
           ],
         }

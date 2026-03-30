@@ -10,7 +10,7 @@ type DomainHistoryCreateInput = {
   expiry: Date | null;
   project: string;
   country: string;
-  usedForPic: string;
+  usedForPic: string | null;
   createdAt: Date;
 };
 
@@ -43,10 +43,6 @@ export async function POST(req: Request) {
 
     if (!country) {
       return NextResponse.json({ error: "Country is required" }, { status: 400 });
-    }
-
-    if (!pic) {
-      return NextResponse.json({ error: "PIC is required" }, { status: 400 });
     }
 
     const domain = await prisma.domain.findUnique({
@@ -91,7 +87,7 @@ export async function POST(req: Request) {
               expiry: domain.expiry ?? null,
               project,
               country,
-              usedForPic: pic,
+              usedForPic: pic ?? null,
               createdAt: now,
             },
           })
@@ -104,7 +100,7 @@ export async function POST(req: Request) {
           usedAt: now,
           usedForProject: project,
           usedForCountry: country,
-          usedForPic: pic,
+          usedForPic: pic ?? null,
         },
       });
 
