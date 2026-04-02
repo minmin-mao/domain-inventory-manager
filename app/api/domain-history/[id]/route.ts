@@ -173,15 +173,25 @@ export async function DELETE(
     return NextResponse.json({ error: "History row not found" }, { status: 404 });
   }
 
-  await historyDelegate.delete({
-    where: { id },
+  await prisma.$transaction(async (tx) => {
+    const txHistoryDelegate = (tx as typeof tx & {
+      domainHistory?: DomainHistoryDelegate;
+    }).domainHistory;
+
+    await txHistoryDelegate?.delete({
+      where: { id },
+    });
+
+    await tx.domain.delete({
+      where: { id: historyRow.domainId },
+    });
   });
 
   notifyInventoryUpdated({
     source: "history",
-    refreshDomains: false,
+    refreshDomains: true,
     refreshHistory: true,
-    refreshOptions: false,
+    refreshOptions: true,
     includeTotal: true,
   });
 

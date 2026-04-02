@@ -454,6 +454,94 @@ export default function DomainManager() {
     }
   };
 
+  const matchesAvailableCacheQuery = (item: DomainItem, url: string) => {
+    const queryString = url.split("?")[1];
+    if (!queryString) return false;
+
+    const params = new URLSearchParams(queryString);
+    if (params.get("status") !== "available") return false;
+
+    const exactDomain = params.get("exactDomain")?.trim();
+    if (exactDomain && item.domain !== exactDomain) return false;
+
+    const hostingProvider = params.get("hostingProvider");
+    if (hostingProvider && item.hosting !== hostingProvider) return false;
+
+    const project = params.get("project");
+    if (project && item.project !== project) return false;
+
+    const country = params.get("country");
+    if (country && item.country !== country) return false;
+
+    const expiry = params.get("expiry");
+    if (expiry && expiry !== "all") {
+      if (!item.expiry) return false;
+
+      const now = new Date();
+      const expiryDate = new Date(item.expiry);
+      if (Number.isNaN(expiryDate.getTime())) return false;
+
+      if (expiry === "expired" && !(expiryDate < now)) return false;
+
+      if (expiry === "le30" || expiry === "le60") {
+        const upperBound = new Date(now);
+        upperBound.setDate(upperBound.getDate() + (expiry === "le30" ? 30 : 60));
+        if (expiryDate < now || expiryDate > upperBound) return false;
+      }
+    }
+
+    const search = params.get("search")?.trim().toLowerCase();
+    if (search) {
+      const searchableValues = [
+        item.domain,
+        item.project,
+        item.hosting,
+        item.account,
+        item.country,
+      ]
+        .filter(Boolean)
+        .map((value) => value.toLowerCase());
+
+      if (!searchableValues.some((value) => value.includes(search))) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const removeDomainFromAvailableCaches = (usedDomain: DomainItem) => {
+    setDomains((prev) => prev.filter((item) => item.id !== usedDomain.id));
+
+    const nextCache = new Map(prefetchedPageCacheRef.current);
+
+    for (const [url, payload] of nextCache.entries()) {
+      if (!url.startsWith("/api/domains?")) continue;
+
+      const domainPayload = payload as PaginatedResponse<DomainItem>;
+      const params = new URLSearchParams(url.split("?")[1] ?? "");
+      if (params.get("status") !== "available") continue;
+
+      const matchesQuery = matchesAvailableCacheQuery(usedDomain, url);
+      if (!matchesQuery) continue;
+
+      const nextItems = domainPayload.items.filter(
+        (item) => item.id !== usedDomain.id
+      );
+
+      nextCache.set(url, {
+        ...domainPayload,
+        items: nextItems,
+        total:
+          typeof domainPayload.total === "number"
+            ? Math.max(domainPayload.total - 1, 0)
+            : domainPayload.total,
+      });
+    }
+
+    prefetchedPageCacheRef.current = nextCache;
+  };
+
   const loadDomainsByStatus = async ({
     status,
     page,
@@ -1451,6 +1539,7 @@ export default function DomainManager() {
   const handleUseDomain = async (id: string) => {
     setIsUsingDomain(true);
     try {
+      const usedDomain = matchedDomains.find((item) => item.id === id) ?? null;
       const projectValue = searchProject.trim();
       const requestCountry = capitalizeText(searchCountry.trim());
       const requestPic = useMode === "pic" ? capitalizeText(searchPic.trim()) : "";
@@ -1495,6 +1584,9 @@ export default function DomainManager() {
       }
 
       setRequestError("");
+      if (usedDomain) {
+        removeDomainFromAvailableCaches(usedDomain);
+      }
       setSearchCountry(requestCountry);
       if (requestPic) {
         setSearchPic(requestPic);
