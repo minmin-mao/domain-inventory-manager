@@ -8,7 +8,12 @@ export type DomainItem = {
   country: string
   hostingProvider?: string | null
   expiryDate?: string | null;
-  status: "taken" | "available"
+  status: "taken" | "available" | "reserved"
+
+  reservedAt?: string | null
+  reservedForProject?: string
+  reservedForCountry?: string
+  reservedForPic?: string
 
   usedAt?: string
   usedForProject?: string
@@ -16,7 +21,11 @@ export type DomainItem = {
   usedForPic?: string
 
   previousState?: {
-    status: "available" | "taken"
+    status: "available" | "reserved" | "taken"
+    reservedAt?: string | null
+    reservedForProject?: string
+    reservedForCountry?: string
+    reservedForPic?: string
     usedAt?: string
     usedForProject?: string
     usedForCountry?: string

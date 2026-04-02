@@ -25,6 +25,7 @@ type Props = {
   handleEdit: (item: DomainItem) => void;
   handleSave: () => void;
   handleDeleteDomain: (id: string) => void;
+  handleReserveDomain?: (item: DomainItem) => void;
   setEditingId: (id: string | null) => void;
 };
 
@@ -47,6 +48,7 @@ export default function DomainRow(props: Props) {
     handleEdit,
     handleSave,
     handleDeleteDomain,
+    handleReserveDomain,
     setEditingId
   } = props;
 
@@ -227,7 +229,7 @@ export default function DomainRow(props: Props) {
 
       {/* Actions */}
       <td className="px-4 py-3">
-        <div className="flex min-w-[170px] justify-end gap-2">
+        <div className="flex min-w-[270px] justify-end gap-2">
           {editingId === item.id ? (
             <>
               <Button onClick={handleSave}>Save</Button>
@@ -244,6 +246,14 @@ export default function DomainRow(props: Props) {
             </>
           ) : (
             <>
+              {handleReserveDomain ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => handleReserveDomain(item)}
+                >
+                  Reserve
+                </Button>
+              ) : null}
               <Button
                 variant="secondary"
                 onClick={() => handleEdit(item)}

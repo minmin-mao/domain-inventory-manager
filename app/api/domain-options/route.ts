@@ -19,6 +19,9 @@ export async function GET() {
         account: true,
         project: true,
         country: true,
+        reservedForProject: true,
+        reservedForCountry: true,
+        reservedForPic: true,
         usedForProject: true,
         usedForCountry: true,
         usedForPic: true,
@@ -41,6 +44,10 @@ export async function GET() {
   ]);
 
   const picEntries = [
+    ...domains.map((item) => ({
+      country: item.reservedForCountry || item.usedForCountry || item.country,
+      pic: item.reservedForPic || item.usedForPic,
+    })),
     ...domains.map((item) => ({
       country: item.usedForCountry || item.country,
       pic: item.usedForPic,
@@ -75,15 +82,18 @@ export async function GET() {
     account: uniqueSorted(domains.map((item) => item.account)),
     project: uniqueSorted([
       ...domains.map((item) => item.project),
+      ...domains.map((item) => item.reservedForProject),
       ...domains.map((item) => item.usedForProject),
       ...history.map((item) => item.project),
     ]),
     country: uniqueSorted([
       ...domains.map((item) => item.country),
+      ...domains.map((item) => item.reservedForCountry),
       ...domains.map((item) => item.usedForCountry),
       ...history.map((item) => item.country),
     ]),
     pic: uniqueSorted([
+      ...domains.map((item) => item.reservedForPic),
       ...domains.map((item) => item.usedForPic),
       ...history.map((item) => item.usedForPic),
     ]),

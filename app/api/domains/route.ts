@@ -8,6 +8,12 @@ import { NextResponse } from "next/server";
 const normalizeText = (value: unknown) =>
   typeof value === "string" ? capitalizeText(value.trim()) : "";
 
+const normalizeNullableText = (value: unknown) => {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? capitalizeText(trimmed) : null;
+};
+
 const parseExpiry = (value: unknown) => {
   if (typeof value !== "string" || !value.trim()) return null;
 
@@ -52,27 +58,52 @@ const buildWhere = (searchParams: URLSearchParams): Prisma.DomainWhereInput => {
   const hosting = searchParams.get("hostingProvider");
   const project = searchParams.get("project");
   const country = searchParams.get("country");
+  const pic = searchParams.get("pic")?.trim();
   const status = searchParams.get("status");
   const exactDomain = searchParams.get("exactDomain")?.trim();
   const expiry = searchParams.get("expiry");
+  const isReserved = status === "reserved";
 
   return {
-    ...(status ? { status: status as "available" | "taken" } : {}),
+    ...(status ? { status: status as "available" | "reserved" | "taken" } : {}),
     ...(exactDomain ? { domain: normalizeDomain(exactDomain) } : {}),
     ...(search
       ? {
           OR: [
             { domain: { contains: search, mode: "insensitive" } },
-            { project: { contains: search, mode: "insensitive" } },
+            isReserved
+              ? { reservedForProject: { contains: search, mode: "insensitive" } }
+              : { project: { contains: search, mode: "insensitive" } },
             { hosting: { contains: search, mode: "insensitive" } },
             { account: { contains: search, mode: "insensitive" } },
-            { country: { contains: search, mode: "insensitive" } },
+            isReserved
+              ? { reservedForCountry: { contains: search, mode: "insensitive" } }
+              : { country: { contains: search, mode: "insensitive" } },
+            ...(isReserved
+              ? [{ reservedForPic: { contains: search, mode: "insensitive" as const } }]
+              : []),
           ],
         }
       : {}),
     ...(hosting ? { hosting } : {}),
-    ...(project ? { project } : {}),
-    ...(country ? { country } : {}),
+    ...(project
+      ? isReserved
+        ? { reservedForProject: project }
+        : { project }
+      : {}),
+    ...(country
+      ? isReserved
+        ? { reservedForCountry: country }
+        : { country }
+      : {}),
+    ...(pic && isReserved
+      ? {
+          reservedForPic: {
+            equals: pic,
+            mode: "insensitive" as const,
+          },
+        }
+      : {}),
     ...(getExpiryWhere(expiry) ? { expiry: getExpiryWhere(expiry) } : {}),
   };
 };
@@ -87,6 +118,7 @@ export async function GET(req: Request) {
     searchParams.has("hostingProvider") ||
     searchParams.has("project") ||
     searchParams.has("country") ||
+    searchParams.has("pic") ||
     searchParams.has("expiry") ||
     searchParams.has("status") ||
     searchParams.has("exactDomain");
@@ -107,7 +139,10 @@ export async function GET(req: Request) {
   const skip = (page - 1) * pageSize;
   const items = await prisma.domain.findMany({
     where,
-    orderBy: { createdAt: "desc" },
+    orderBy:
+      searchParams.get("status") === "reserved"
+        ? { reservedAt: "desc" }
+        : { createdAt: "desc" },
     skip,
     take: pageSize,
   });
@@ -135,7 +170,15 @@ export async function POST(req: Request) {
         project: normalizeText(body.project),
         country: normalizeText(body.country),
         ...(expiry ? { expiry } : {}),
-        status: "available",
+        status: body.status === "reserved" ? "reserved" : "available",
+        ...(body.status === "reserved"
+          ? {
+              reservedAt: body.reservedAt ? new Date(body.reservedAt) : new Date(),
+              reservedForProject: normalizeNullableText(body.reservedForProject ?? body.project),
+              reservedForCountry: normalizeNullableText(body.reservedForCountry ?? body.country),
+              reservedForPic: normalizeNullableText(body.reservedForPic),
+            }
+          : {}),
       },
     });
 
@@ -178,6 +221,30 @@ export async function PUT(req: Request) {
         country: normalizeText(body.country),
         ...(expiry ? { expiry } : { expiry: null }),
         status: body.status,
+        ...(Object.prototype.hasOwnProperty.call(body, "reservedAt")
+          ? { reservedAt: body.reservedAt ? new Date(body.reservedAt) : null }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "reservedForProject")
+          ? { reservedForProject: normalizeNullableText(body.reservedForProject) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "reservedForCountry")
+          ? { reservedForCountry: normalizeNullableText(body.reservedForCountry) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "reservedForPic")
+          ? { reservedForPic: normalizeNullableText(body.reservedForPic) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "usedAt")
+          ? { usedAt: body.usedAt ? new Date(body.usedAt) : null }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "usedForProject")
+          ? { usedForProject: normalizeNullableText(body.usedForProject) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "usedForCountry")
+          ? { usedForCountry: normalizeNullableText(body.usedForCountry) }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(body, "usedForPic")
+          ? { usedForPic: normalizeNullableText(body.usedForPic) }
+          : {}),
       },
     });
 

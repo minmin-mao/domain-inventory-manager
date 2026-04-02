@@ -30,6 +30,7 @@ type Props = {
   handleEdit: (item: DomainItem) => void;
   handleSave: () => void;
   handleDeleteDomain: (id: string) => void;
+  handleReserveDomain?: (item: DomainItem) => void;
   setEditingId: (id: string | null) => void;
 };
 
@@ -59,6 +60,7 @@ export default function DomainTable(props: Props) {
     handleEdit,
     handleSave,
     handleDeleteDomain,
+    handleReserveDomain,
     setEditingId
   } = props;
 
@@ -127,6 +129,7 @@ export default function DomainTable(props: Props) {
                   handleEdit={handleEdit}
                   handleSave={handleSave}
                   handleDeleteDomain={handleDeleteDomain}
+                  handleReserveDomain={handleReserveDomain}
                   setEditingId={setEditingId}
                 />
               ))

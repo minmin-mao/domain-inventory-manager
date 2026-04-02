@@ -19,6 +19,7 @@ type UseDomainBody = {
   project?: string;
   country?: string;
   pic?: string;
+  useMode?: "pic" | "backup";
 };
 
 const normalizeText = (value: string | undefined) =>
@@ -29,20 +30,13 @@ export async function POST(req: Request) {
     const body = (await req.json()) as UseDomainBody;
 
     const domainId = body.id?.trim();
-    const project = normalizeText(body.project);
-    const country = normalizeText(body.country);
-    const pic = normalizeText(body.pic);
+    const requestedProject = normalizeText(body.project);
+    const requestedCountry = normalizeText(body.country);
+    const requestedPic = normalizeText(body.pic);
+    const useMode = body.useMode === "backup" ? "backup" : "pic";
 
     if (!domainId) {
       return NextResponse.json({ error: "Missing domain id" }, { status: 400 });
-    }
-
-    if (!project) {
-      return NextResponse.json({ error: "Project is required" }, { status: 400 });
-    }
-
-    if (!country) {
-      return NextResponse.json({ error: "Country is required" }, { status: 400 });
     }
 
     const domain = await prisma.domain.findUnique({
@@ -53,11 +47,32 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Domain not found" }, { status: 404 });
     }
 
-    if (domain.status !== "available") {
+    if (domain.status !== "available" && domain.status !== "reserved") {
       return NextResponse.json(
-        { error: "Only available domains can be used" },
+        { error: "Only available or reserved domains can be used" },
         { status: 400 }
       );
+    }
+
+    const project =
+      requestedProject || normalizeText(domain.reservedForProject ?? undefined);
+    const country =
+      requestedCountry || normalizeText(domain.reservedForCountry ?? undefined);
+    const pic =
+      useMode === "backup"
+        ? null
+        : requestedPic || normalizeText(domain.reservedForPic ?? undefined) || null;
+
+    if (!project) {
+      return NextResponse.json({ error: "Project is required" }, { status: 400 });
+    }
+
+    if (!country) {
+      return NextResponse.json({ error: "Country is required" }, { status: 400 });
+    }
+
+    if (useMode === "pic" && !pic) {
+      return NextResponse.json({ error: "PIC is required" }, { status: 400 });
     }
 
     const now = new Date();
@@ -97,6 +112,10 @@ export async function POST(req: Request) {
         where: { id: domain.id },
         data: {
           status: "taken",
+          reservedAt: null,
+          reservedForProject: null,
+          reservedForCountry: null,
+          reservedForPic: null,
           usedAt: now,
           usedForProject: project,
           usedForCountry: country,
