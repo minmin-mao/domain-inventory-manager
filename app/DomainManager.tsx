@@ -9,6 +9,7 @@ import Button from "@/components/Button";
 import SmartDropdown from "@/components/SmartDropdown";
 import DomainTable from "@/components/domain/DomainTable";
 import HistoryTable from "@/components/domain/HistoryTable";
+import ReservedTable from "@/components/domain/ReservedTable";
 import { FilterBar } from "@/components/filters/FilterBar";
 
 // Utilities
@@ -54,7 +55,7 @@ type RealtimeInventoryUpdate = {
   at: string;
 };
 
-type DashboardTab = "available" | "backup" | "history";
+type DashboardTab = "available" | "reserved" | "backup" | "history";
 type UseMode = "pic" | "backup";
 
 const DEFAULT_ROWS_PER_PAGE = 5;
@@ -110,11 +111,13 @@ export default function DomainManager() {
   // ================================
 
   const [domains, setDomains] = useState<DomainItem[]>([]);
+  const [reservedDomains, setReservedDomains] = useState<DomainItem[]>([]);
   const [backupHistory, setBackupHistory] = useState<DomainHistoryItem[]>([]);
   const [finalHistory, setFinalHistory] = useState<DomainHistoryItem[]>([]);
   const [activeTab, setActiveTab] = useState<DashboardTab>("available");
   const [loadedTabs, setLoadedTabs] = useState<Record<DashboardTab, boolean>>({
     available: true,
+    reserved: false,
     backup: false,
     history: false,
   });
@@ -126,6 +129,7 @@ export default function DomainManager() {
   const [country, setCountry] = useState("");
   const [project, setProject] = useState("");
   const [expiry, setExpiry] = useState("");
+  const [reserveOnCreate, setReserveOnCreate] = useState(false);
 
   // suggestion
   const [matchedDomains, setMatchedDomains] = useState<DomainItem[]>([]);
@@ -167,6 +171,7 @@ export default function DomainManager() {
   });
   const [tabSearches, setTabSearches] = useState<Record<DashboardTab, string>>({
     available: "",
+    reserved: "",
     backup: "",
     history: "",
   });
@@ -174,30 +179,43 @@ export default function DomainManager() {
     Record<DashboardTab, string>
   >({
     available: "",
+    reserved: "",
     backup: "",
     history: "",
   });
 
   // pagination state
   const [pageAvailable, setPageAvailable] = useState(1);
+  const [pageReserved, setPageReserved] = useState(1);
   const [pageBackup, setPageBackup] = useState(1);
   const [pageHistory, setPageHistory] = useState(1);
   const [totalAvailable, setTotalAvailable] = useState(0);
+  const [totalReserved, setTotalReserved] = useState(0);
   const [totalBackup, setTotalBackup] = useState(0);
   const [totalHistory, setTotalHistory] = useState(0);
   const [historyActionId, setHistoryActionId] = useState<string | null>(null);
+  const [reservedActionId, setReservedActionId] = useState<string | null>(null);
   const [isDomainsLoading, setIsDomainsLoading] = useState(true);
+  const [isReservedLoading, setIsReservedLoading] = useState(false);
   const [isBackupLoading, setIsBackupLoading] = useState(false);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [isOptionsLoading, setIsOptionsLoading] = useState(true);
   const [isAddingDomain, setIsAddingDomain] = useState(false);
   const [isUsingDomain, setIsUsingDomain] = useState(false);
   const [isSuggestingDomain, setIsSuggestingDomain] = useState(false);
+  const [reserveTarget, setReserveTarget] = useState<DomainItem | null>(null);
+  const [reserveProject, setReserveProject] = useState("");
+  const [reserveCountry, setReserveCountry] = useState("");
+  const [reservePic, setReservePic] = useState("");
+  const [reserveError, setReserveError] = useState("");
+  const [reservePicTarget, setReservePicTarget] = useState<DomainItem | null>(null);
+  const [reservePicValue, setReservePicValue] = useState("");
   const [assignPicTarget, setAssignPicTarget] = useState<DomainHistoryItem | null>(null);
   const [assignPicValue, setAssignPicValue] = useState("");
 
   const rowsPerPage = DEFAULT_ROWS_PER_PAGE;
   const totalAvailableRef = useRef(0);
+  const totalReservedRef = useRef(0);
   const totalBackupRef = useRef(0);
   const totalHistoryRef = useRef(0);
   const suggestCacheRef = useRef<Map<string, DomainItem[]>>(new Map());
@@ -221,6 +239,10 @@ export default function DomainManager() {
   useEffect(() => {
     totalHistoryRef.current = totalHistory;
   }, [totalHistory]);
+
+  useEffect(() => {
+    totalReservedRef.current = totalReserved;
+  }, [totalReserved]);
 
   useEffect(() => {
     totalBackupRef.current = totalBackup;
@@ -318,19 +340,26 @@ export default function DomainManager() {
     return data;
   };
 
-  const getAvailablePageUrl = ({
+  const getDomainPageUrl = ({
+    status,
     page,
     includeTotal,
   }: {
+    status: "available" | "reserved";
     page: number;
     includeTotal: boolean;
   }) =>
     `/api/domains?${buildInventoryQuery(
-      buildFiltersForSearch(debouncedTabSearches.available, false),
+      buildFiltersForSearch(
+        status === "reserved"
+          ? debouncedTabSearches.reserved
+          : debouncedTabSearches.available,
+        false
+      ),
       page,
       rowsPerPage,
       {
-        status: "available",
+        status,
         includeTotal: includeTotal ? "true" : "false",
       }
     )}`;
@@ -359,10 +388,12 @@ export default function DomainManager() {
       }
     )}`;
 
-  const prefetchAvailableNextPage = async ({
+  const prefetchDomainNextPage = async ({
+    status,
     currentPage,
     totalItems,
   }: {
+    status: "available" | "reserved";
     currentPage: number;
     totalItems: number;
   }) => {
@@ -370,7 +401,8 @@ export default function DomainManager() {
     const totalPages = Math.max(1, Math.ceil(totalItems / rowsPerPage));
     if (nextPage > totalPages) return;
 
-    const url = getAvailablePageUrl({
+    const url = getDomainPageUrl({
+      status,
       page: nextPage,
       includeTotal: false,
     });
@@ -385,7 +417,7 @@ export default function DomainManager() {
         pageSize: rowsPerPage,
       });
     } catch (error) {
-      console.error(`Failed to prefetch available page ${nextPage}`, error);
+      console.error(`Failed to prefetch ${status} page ${nextPage}`, error);
     }
   };
 
@@ -422,18 +454,24 @@ export default function DomainManager() {
     }
   };
 
-  const loadAvailableDomains = async ({
+  const loadDomainsByStatus = async ({
+    status,
     page,
     includeTotal,
     silent,
   }: {
+    status: "available" | "reserved";
     page: number;
     includeTotal: boolean;
     silent: boolean;
   }) => {
-    if (!silent) setIsDomainsLoading(true);
+    const setLoading = status === "reserved" ? setIsReservedLoading : setIsDomainsLoading;
+    const setRows = status === "reserved" ? setReservedDomains : setDomains;
+    const setTotal = status === "reserved" ? setTotalReserved : setTotalAvailable;
 
-    const url = getAvailablePageUrl({ page, includeTotal });
+    if (!silent) setLoading(true);
+
+    const url = getDomainPageUrl({ status, page, includeTotal });
 
     try {
       const data = await fetchPaginatedWithCache<DomainItem>(url, {
@@ -443,38 +481,55 @@ export default function DomainManager() {
         pageSize: rowsPerPage,
       });
 
-      setDomains(data.items);
+      setRows(data.items);
       if (typeof data.total === "number") {
-        setTotalAvailable(data.total);
+        setTotal(data.total);
       }
 
       const effectiveTotal =
-        typeof data.total === "number" ? data.total : totalAvailableRef.current;
-      if (activeTab === "available") {
-        void prefetchAvailableNextPage({
+        typeof data.total === "number"
+          ? data.total
+          : status === "reserved"
+            ? totalReservedRef.current
+            : totalAvailableRef.current;
+      if (activeTab === status) {
+        void prefetchDomainNextPage({
+          status,
           currentPage: page,
           totalItems: effectiveTotal,
         });
       }
     } catch (error) {
-      console.error("Failed to load domains", error);
-      setDomains([]);
-      setTotalAvailable(0);
+      console.error(`Failed to load ${status} domains`, error);
+      setRows([]);
+      setTotal(0);
     } finally {
-      if (!silent) setIsDomainsLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  const loadAvailableSummary = async ({ silent }: { silent: boolean }) => {
+  const loadDomainSummary = async ({
+    status,
+    silent,
+  }: {
+    status: "available" | "reserved";
+    silent: boolean;
+  }) => {
     const query = buildInventoryQuery(
-      buildFiltersForSearch(debouncedTabSearches.available, false),
+      buildFiltersForSearch(
+        status === "reserved"
+          ? debouncedTabSearches.reserved
+          : debouncedTabSearches.available,
+        false
+      ),
       1,
       1,
       {
-        status: "available",
+        status,
         includeTotal: "true",
       }
     );
+    const setTotal = status === "reserved" ? setTotalReserved : setTotalAvailable;
 
     try {
       const res = await fetch(`/api/domains?${query}`);
@@ -483,12 +538,12 @@ export default function DomainManager() {
         : { items: [], total: 0, page: 1, pageSize: 1 };
 
       if (typeof data.total === "number") {
-        setTotalAvailable(data.total);
+        setTotal(data.total);
       }
     } catch (error) {
-      console.error("Failed to load domain summary", error);
+      console.error(`Failed to load ${status} summary`, error);
       if (!silent) {
-        setTotalAvailable(0);
+        setTotal(0);
       }
     }
   };
@@ -600,7 +655,8 @@ export default function DomainManager() {
 
     const includeTotal = pageAvailable === 1 || totalAvailableRef.current === 0;
 
-    void loadAvailableDomains({
+    void loadDomainsByStatus({
+      status: "available",
       page: pageAvailable,
       includeTotal,
       silent: false,
@@ -615,6 +671,29 @@ export default function DomainManager() {
     filters.project,
     filters.country,
     debouncedTabSearches.available,
+  ]);
+
+  useEffect(() => {
+    if (!loadedTabs.reserved) return;
+
+    const includeTotal = pageReserved === 1 || totalReservedRef.current === 0;
+
+    void loadDomainsByStatus({
+      status: "reserved",
+      page: pageReserved,
+      includeTotal,
+      silent: false,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    loadedTabs.reserved,
+    pageReserved,
+    rowsPerPage,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+    debouncedTabSearches.reserved,
   ]);
 
   useEffect(() => {
@@ -665,6 +744,23 @@ export default function DomainManager() {
   ]);
 
   useEffect(() => {
+    if (loadedTabs.reserved) return;
+
+    void loadDomainSummary({
+      status: "reserved",
+      silent: true,
+    }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    loadedTabs.reserved,
+    filters.expiry,
+    filters.hostingProvider,
+    filters.project,
+    filters.country,
+    debouncedTabSearches.reserved,
+  ]);
+
+  useEffect(() => {
     if (loadedTabs.backup) return;
 
     void loadHistorySummary({
@@ -701,6 +797,7 @@ export default function DomainManager() {
 
   useEffect(() => {
     setPageAvailable(1);
+    setPageReserved(1);
     setPageBackup(1);
     setPageHistory(1);
   }, [filters.expiry, filters.hostingProvider, filters.project, filters.country, filters.pic]);
@@ -708,6 +805,10 @@ export default function DomainManager() {
   useEffect(() => {
     setPageAvailable(1);
   }, [debouncedTabSearches.available]);
+
+  useEffect(() => {
+    setPageReserved(1);
+  }, [debouncedTabSearches.reserved]);
 
   useEffect(() => {
     setPageBackup(1);
@@ -739,14 +840,28 @@ export default function DomainManager() {
     if (refreshDomains) {
       if (loadedTabs.available) {
         jobs.push(
-          loadAvailableDomains({
+          loadDomainsByStatus({
+            status: "available",
             page: pageAvailable,
             includeTotal,
             silent,
           })
         );
       } else {
-        jobs.push(loadAvailableSummary({ silent: true }));
+        jobs.push(loadDomainSummary({ status: "available", silent: true }));
+      }
+
+      if (loadedTabs.reserved) {
+        jobs.push(
+          loadDomainsByStatus({
+            status: "reserved",
+            page: pageReserved,
+            includeTotal,
+            silent,
+          })
+        );
+      } else {
+        jobs.push(loadDomainSummary({ status: "reserved", silent: true }));
       }
     }
 
@@ -862,9 +977,16 @@ export default function DomainManager() {
   // Derived Data
   // ================================
   const totalPagesAvailable = Math.max(1, Math.ceil(totalAvailable / rowsPerPage));
+  const totalPagesReserved = Math.max(1, Math.ceil(totalReserved / rowsPerPage));
   const totalPagesBackup = Math.max(1, Math.ceil(totalBackup / rowsPerPage));
   const totalPagesHistory = Math.max(1, Math.ceil(totalHistory / rowsPerPage));
   const activeSearch = tabSearches[activeTab];
+  const showReservedTab =
+    isReservedLoading ||
+    totalReserved > 0 ||
+    reservedDomains.length > 0 ||
+    activeTab === "reserved" ||
+    tabSearches.reserved.trim().length > 0;
   const showBackupTab =
     isBackupLoading ||
     totalBackup > 0 ||
@@ -877,6 +999,11 @@ export default function DomainManager() {
       label: "Available",
       count: totalAvailable,
       searchPlaceholder: "Search available domains",
+    },
+    reserved: {
+      label: "Reserved",
+      count: totalReserved,
+      searchPlaceholder: "Search reserved domains",
     },
     backup: {
       label: "Backup Pending",
@@ -1010,13 +1137,15 @@ export default function DomainManager() {
   };
 
   useEffect(() => {
-    if (activeTab === "backup" && !showBackupTab) {
+    if ((activeTab === "backup" && !showBackupTab) || (activeTab === "reserved" && !showReservedTab)) {
       setActiveTab("available");
     }
-  }, [activeTab, showBackupTab]);
+  }, [activeTab, showBackupTab, showReservedTab]);
 
   useEffect(() => {
-    if (activeTab !== "available" || !highlightDomainId || isDomainsLoading) return;
+    const isDomainTab = activeTab === "available" || activeTab === "reserved";
+    const isLoading = activeTab === "reserved" ? isReservedLoading : isDomainsLoading;
+    if (!isDomainTab || !highlightDomainId || isLoading) return;
 
     const timer = window.setTimeout(() => {
       const el = document.getElementById(`domain-${highlightDomainId}`);
@@ -1024,7 +1153,7 @@ export default function DomainManager() {
     }, 120);
 
     return () => clearTimeout(timer);
-  }, [activeTab, highlightDomainId, isDomainsLoading]);
+  }, [activeTab, highlightDomainId, isDomainsLoading, isReservedLoading]);
 
   useEffect(() => {
     if (
@@ -1100,7 +1229,12 @@ export default function DomainManager() {
         account,
         project,
         country: (capitalizeText(country.trim()) || "-"),
-        status: "available",
+        status: reserveOnCreate ? "reserved" : "available",
+        reservedAt: reserveOnCreate ? new Date().toISOString() : null,
+        reservedForProject: reserveOnCreate ? capitalizeText(project.trim()) : undefined,
+        reservedForCountry: reserveOnCreate
+          ? (capitalizeText(country.trim()) || undefined)
+          : undefined,
       };
 
       const res = await fetch("/api/domains", {
@@ -1145,6 +1279,7 @@ export default function DomainManager() {
       setCountry("");
       setAccount("");
       setExpiry("");
+      setReserveOnCreate(false);
 
       domainRef.current?.focus();
       queueRefresh({
@@ -1183,12 +1318,95 @@ export default function DomainManager() {
     });
   };
 
+  const handleOpenReserveModal = (item: DomainItem) => {
+    setReserveTarget(item);
+    setReserveProject(capitalizeText(searchProject.trim()) || "");
+    setReserveCountry(capitalizeText(searchCountry.trim()) || "");
+    setReservePic("");
+    setReserveError("");
+  };
+
+  const closeReserveModal = () => {
+    setReserveTarget(null);
+    setReserveProject("");
+    setReserveCountry("");
+    setReservePic("");
+    setReserveError("");
+  };
+
+  const handleConfirmReserve = async () => {
+    if (!reserveTarget) return;
+
+    const projectValue = capitalizeText(reserveProject.trim());
+    const countryValue = capitalizeText(reserveCountry.trim());
+    const picValue = capitalizeText(reservePic.trim());
+
+    if (!projectValue) {
+      setReserveError("Project is required.");
+      return;
+    }
+
+    if (!countryValue) {
+      setReserveError("Country is required.");
+      return;
+    }
+
+    setReservedActionId(reserveTarget.id);
+
+    try {
+      const res = await fetch("/api/domains/reserve", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: reserveTarget.id,
+          project: projectValue,
+          country: countryValue,
+          pic: picValue || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setReserveError(data.error || "Failed to reserve domain.");
+        return;
+      }
+
+      if (picValue) {
+        setPicOptions((prev) =>
+          prev.includes(picValue) ? prev : [...prev, picValue].sort()
+        );
+        setPicByCountryOptions((prev) => {
+          const current = prev[countryValue] ?? [];
+          if (current.includes(picValue)) return prev;
+          return {
+            ...prev,
+            [countryValue]: [...current, picValue].sort(),
+          };
+        });
+      }
+
+      closeReserveModal();
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: false,
+        refreshOptions: true,
+        includeTotal: true,
+      });
+    } finally {
+      setReservedActionId(null);
+    }
+  };
+
   const handleGoToDuplicate = () => {
     if (!duplicateDomain) return;
 
     const targetTab: DashboardTab =
       duplicateDomain.status === "available"
         ? "available"
+        : duplicateDomain.status === "reserved"
+          ? "reserved"
         : duplicateDomain.usedForPic?.trim()
           ? "history"
           : "backup";
@@ -1205,6 +1423,10 @@ export default function DomainManager() {
 
     if (targetTab === "available") {
       setPageAvailable(1);
+      setHighlightDomainId(duplicateDomain.id);
+      setHighlightHistoryDomainId(null);
+    } else if (targetTab === "reserved") {
+      setPageReserved(1);
       setHighlightDomainId(duplicateDomain.id);
       setHighlightHistoryDomainId(null);
     } else if (targetTab === "backup") {
@@ -1258,6 +1480,7 @@ export default function DomainManager() {
           project: projectValue,
           country: requestCountry,
           pic: requestPic || undefined,
+          useMode,
         }),
       });
 
@@ -1301,6 +1524,187 @@ export default function DomainManager() {
       });
     } finally {
       setIsUsingDomain(false);
+    }
+  };
+
+  const handleUseReservedAsBackup = async (item: DomainItem) => {
+    if (!item.reservedForProject || !item.reservedForCountry) {
+      alert("Reserved project and country are required before using this domain.");
+      return;
+    }
+
+    setReservedActionId(item.id);
+
+    try {
+      const res = await fetch("/api/domains/use", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: item.id,
+          project: item.reservedForProject,
+          country: item.reservedForCountry,
+          useMode: "backup",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to use reserved domain as backup.");
+        return;
+      }
+
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: true,
+        refreshOptions: true,
+        includeTotal: true,
+      });
+    } finally {
+      setReservedActionId(null);
+    }
+  };
+
+  const handleUseReservedForPic = async (item: DomainItem) => {
+    if (!item.reservedForProject || !item.reservedForCountry) {
+      alert("Reserved project and country are required before using this domain.");
+      return;
+    }
+
+    if (item.reservedForPic?.trim()) {
+      setReservedActionId(item.id);
+
+      try {
+        const res = await fetch("/api/domains/use", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            id: item.id,
+            project: item.reservedForProject,
+            country: item.reservedForCountry,
+            pic: item.reservedForPic,
+            useMode: "pic",
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok) {
+          alert(data.error || "Failed to use reserved domain for PIC.");
+          return;
+        }
+
+        queueRefresh({
+          refreshDomains: true,
+          refreshHistory: true,
+          refreshOptions: true,
+          includeTotal: true,
+        });
+      } finally {
+        setReservedActionId(null);
+      }
+
+      return;
+    }
+
+    setReservePicTarget(item);
+    setReservePicValue("");
+  };
+
+  const closeReservePicModal = () => {
+    setReservePicTarget(null);
+    setReservePicValue("");
+  };
+
+  const handleConfirmReservedPicUse = async () => {
+    if (!reservePicTarget) return;
+
+    const normalizedPic = capitalizeText(reservePicValue.trim());
+    if (!normalizedPic) {
+      alert("PIC is required.");
+      return;
+    }
+
+    setReservedActionId(reservePicTarget.id);
+
+    try {
+      const res = await fetch("/api/domains/use", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: reservePicTarget.id,
+          project: reservePicTarget.reservedForProject,
+          country: reservePicTarget.reservedForCountry,
+          pic: normalizedPic,
+          useMode: "pic",
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to use reserved domain for PIC.");
+        return;
+      }
+
+      if (reservePicTarget.reservedForCountry) {
+        setPicOptions((prev) =>
+          prev.includes(normalizedPic) ? prev : [...prev, normalizedPic].sort()
+        );
+        setPicByCountryOptions((prev) => {
+          const current = prev[reservePicTarget.reservedForCountry!] ?? [];
+          if (current.includes(normalizedPic)) return prev;
+          return {
+            ...prev,
+            [reservePicTarget.reservedForCountry!]: [...current, normalizedPic].sort(),
+          };
+        });
+      }
+
+      closeReservePicModal();
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: true,
+        refreshOptions: true,
+        includeTotal: true,
+      });
+    } finally {
+      setReservedActionId(null);
+    }
+  };
+
+  const handleReleaseReserved = async (item: DomainItem) => {
+    const ok = confirm(`Release "${item.domain}" back to available?`);
+    if (!ok) return;
+
+    setReservedActionId(item.id);
+
+    try {
+      const res = await fetch("/api/domains/release", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id: item.id }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to release reserved domain.");
+        return;
+      }
+
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: false,
+        refreshOptions: true,
+        includeTotal: true,
+      });
+    } finally {
+      setReservedActionId(null);
     }
   };
 
@@ -1616,6 +2020,16 @@ export default function DomainManager() {
             />
           </div>
 
+          <label className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={reserveOnCreate}
+              onChange={(e) => setReserveOnCreate(e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-700 bg-zinc-900"
+            />
+            Reserve
+          </label>
+
           {duplicateDomain && (
             <div className="mt-4 flex items-center justify-between rounded-lg border border-red-800 bg-red-950/40 p-4">
               <div className="text-sm text-red-300">
@@ -1839,8 +2253,12 @@ export default function DomainManager() {
         <div className="grid gap-6 xl:grid-cols-[220px_minmax(0,1fr)]">
           <aside className="rounded-2xl border border-zinc-800 bg-zinc-950/50 p-3">
             <div className="space-y-2">
-              {(["available", "backup", "history"] as DashboardTab[])
-                .filter((tab) => tab !== "backup" || showBackupTab)
+              {(["available", "reserved", "backup", "history"] as DashboardTab[])
+                .filter((tab) => {
+                  if (tab === "reserved") return showReservedTab;
+                  if (tab === "backup") return showBackupTab;
+                  return true;
+                })
                 .map((tab) => {
                   const isActive = activeTab === tab;
                   const tabConfig = activeTabConfig[tab];
@@ -1882,6 +2300,8 @@ export default function DomainManager() {
                   <p className="text-xs text-zinc-500">
                     {activeTab === "available"
                       ? "Available inventory ready for assignment."
+                      : activeTab === "reserved"
+                        ? "Reserved domains waiting to be used or released."
                       : activeTab === "backup"
                         ? "Taken domains waiting for PIC assignment."
                         : "Final usage history with PIC assigned."}
@@ -1934,7 +2354,26 @@ export default function DomainManager() {
                 handleEdit={handleEdit}
                 handleSave={handleSave}
                 handleDeleteDomain={handleDeleteDomain}
+                handleReserveDomain={handleOpenReserveModal}
                 setEditingId={setEditingId}
+              />
+            ) : activeTab === "reserved" ? (
+              <ReservedTable
+                title="Reserved domains"
+                emptyLabel="No reserved domains found."
+                highlightDomainId={highlightDomainId}
+                domains={reservedDomains}
+                page={pageReserved}
+                totalPages={totalPagesReserved}
+                totalItems={totalReserved}
+                rowsPerPage={rowsPerPage}
+                isLoading={isReservedLoading}
+                reservedActionId={reservedActionId}
+                onPrev={() => setPageReserved((p) => Math.max(p - 1, 1))}
+                onNext={() => setPageReserved((p) => Math.min(p + 1, totalPagesReserved))}
+                onUseForPic={handleUseReservedForPic}
+                onUseAsBackup={handleUseReservedAsBackup}
+                onRelease={handleReleaseReserved}
               />
             ) : activeTab === "backup" ? (
               <HistoryTable
@@ -1968,6 +2407,7 @@ export default function DomainManager() {
                 onPrev={() => setPageHistory((p) => Math.max(p - 1, 1))}
                 onNext={() => setPageHistory((p) => Math.min(p + 1, totalPagesHistory))}
                 historyActionId={historyActionId}
+                onAssignPic={handleAssignHistoryPic}
                 onUndoHistory={handleUndoHistory}
                 onDeleteHistory={handleDeleteHistory}
               />
@@ -1980,7 +2420,7 @@ export default function DomainManager() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
           <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
             <h3 className="text-lg font-semibold text-zinc-100">
-              Assign PIC
+              {assignPicTarget.usageType === "backup" ? "Assign PIC" : "Edit PIC"}
             </h3>
             <p className="mt-1 text-sm text-zinc-400">
               {assignPicTarget.domain}
@@ -2013,6 +2453,109 @@ export default function DomainManager() {
                 disabled={Boolean(historyActionId)}
               >
                 {historyActionId ? "Saving..." : "Save PIC"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {reserveTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-xl rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-zinc-100">
+              Reserve domain
+            </h3>
+            <p className="mt-1 text-sm text-zinc-400">{reserveTarget.domain}</p>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <Input
+                value={reserveProject}
+                placeholder="Project"
+                onChange={(e) => {
+                  setReserveProject(capitalizeText(e.target.value));
+                  if (reserveError) setReserveError("");
+                }}
+              />
+              <Input
+                value={reserveCountry}
+                placeholder="Country"
+                onChange={(e) => {
+                  setReserveCountry(capitalizeText(e.target.value));
+                  if (reserveError) setReserveError("");
+                }}
+              />
+              <div className="md:col-span-2">
+                <SmartDropdown
+                  value={reservePic}
+                  setValue={(value) => {
+                    setReservePic(capitalizeText(value));
+                    if (reserveError) setReserveError("");
+                  }}
+                  options={reserveCountry.trim() ? (picByCountryOptions[reserveCountry.trim()] ?? picOptions) : picOptions}
+                  setOptions={setPicOptions}
+                  placeholder="PIC (optional)"
+                />
+              </div>
+            </div>
+
+            {reserveError ? (
+              <p className="mt-3 text-sm text-red-400">{reserveError}</p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={closeReserveModal}
+                disabled={Boolean(reservedActionId)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleConfirmReserve()}
+                disabled={Boolean(reservedActionId)}
+              >
+                {reservedActionId ? "Reserving..." : "Reserve"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {reservePicTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-700 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-zinc-100">
+              Add PIC for reserved domain
+            </h3>
+            <p className="mt-1 text-sm text-zinc-400">{reservePicTarget.domain}</p>
+
+            <div className="mt-4">
+              <SmartDropdown
+                value={reservePicValue}
+                setValue={(value) => setReservePicValue(capitalizeText(value))}
+                options={
+                  reservePicTarget.reservedForCountry
+                    ? (picByCountryOptions[reservePicTarget.reservedForCountry] ?? picOptions)
+                    : picOptions
+                }
+                setOptions={setPicOptions}
+                placeholder="PIC"
+              />
+            </div>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={closeReservePicModal}
+                disabled={Boolean(reservedActionId)}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleConfirmReservedPicUse()}
+                disabled={Boolean(reservedActionId)}
+              >
+                {reservedActionId ? "Using..." : "Use for PIC"}
               </Button>
             </div>
           </div>

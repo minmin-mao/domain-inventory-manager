@@ -127,13 +127,17 @@ export default function HistoryTable({
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex min-w-[190px] flex-wrap justify-end gap-2">
-                        {isBackup && onAssignPic ? (
+                        {onAssignPic ? (
                           <Button
                             variant="secondary"
                             disabled={isBusy || item.id.startsWith("legacy-")}
                             onClick={() => onAssignPic(item)}
                           >
-                            {isBusy ? "Saving..." : "Assign PIC"}
+                            {isBusy
+                              ? "Saving..."
+                              : isBackup
+                                ? "Assign PIC"
+                                : "Edit PIC"}
                           </Button>
                         ) : null}
 
