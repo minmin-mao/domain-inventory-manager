@@ -1,3 +1,4 @@
+import { getDomainSelect } from "@/lib/domain/domainDb";
 import { prisma } from "@/lib/prisma";
 import { capitalizeText } from "@/lib/domain/textUtils";
 import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
@@ -39,8 +40,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing domain id" }, { status: 400 });
     }
 
+    const select = await getDomainSelect();
     const domain = await prisma.domain.findUnique({
       where: { id: domainId },
+      select,
     });
 
     if (!domain) {
@@ -55,7 +58,9 @@ export async function POST(req: Request) {
     }
 
     const project =
-      requestedProject || normalizeText(domain.reservedForProject ?? undefined);
+      domain.status === "reserved"
+        ? requestedProject || normalizeText(domain.reservedForProject ?? undefined)
+        : normalizeText(domain.project);
     const country =
       requestedCountry || normalizeText(domain.reservedForCountry ?? undefined);
     const pic =
@@ -110,6 +115,7 @@ export async function POST(req: Request) {
 
       const updatedDomain = await tx.domain.update({
         where: { id: domain.id },
+        select,
         data: {
           status: "taken",
           reservedAt: null,

@@ -13,6 +13,7 @@ model Domain {
   account        String
   project        String
   country        String
+  language       String?
   expiry         DateTime?
   reservedAt     DateTime?
   reservedForProject String?

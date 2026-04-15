@@ -1,3 +1,4 @@
+import { getDomainSelect } from "@/lib/domain/domainDb";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
@@ -217,8 +218,10 @@ export async function GET(req: Request) {
     }
 
     const where = buildLegacyWhere(searchParams);
+    const select = await getDomainSelect();
     const takenDomains = await prisma.domain.findMany({
       where,
+      select,
       orderBy: { usedAt: "desc" },
       skip,
       take: pageSize,

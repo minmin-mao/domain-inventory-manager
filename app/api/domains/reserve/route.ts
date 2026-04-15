@@ -1,3 +1,4 @@
+import { getDomainSelect } from "@/lib/domain/domainDb";
 import { prisma } from "@/lib/prisma";
 import { capitalizeText } from "@/lib/domain/textUtils";
 import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
@@ -35,8 +36,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Country is required" }, { status: 400 });
     }
 
+    const select = await getDomainSelect();
     const domain = await prisma.domain.findUnique({
       where: { id: domainId },
+      select,
     });
 
     if (!domain) {
@@ -54,6 +57,7 @@ export async function POST(req: Request) {
 
     const updatedDomain = await prisma.domain.update({
       where: { id: domain.id },
+      select,
       data: {
         status: "reserved",
         reservedAt,

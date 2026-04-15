@@ -1,5 +1,7 @@
+import { getDomainSelect, hasDomainLanguageColumn } from "@/lib/domain/domainDb";
 import { prisma } from "@/lib/prisma";
 import { normalizeDomain } from "@/lib/domain/domainUtils";
+import { deriveLanguageFromCountry, normalizeLanguageCode } from "@/lib/domain/languageUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
 import { notifyInventoryUpdated } from "@/lib/realtime/domainEvents";
 import { Prisma } from "@prisma/client";
@@ -12,6 +14,16 @@ const normalizeNullableText = (value: unknown) => {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   return trimmed ? capitalizeText(trimmed) : null;
+};
+
+const normalizeLanguage = (value: unknown, country: unknown) => {
+  const normalizedLanguage = normalizeLanguageCode(
+    typeof value === "string" ? value : null
+  );
+
+  return normalizedLanguage || deriveLanguageFromCountry(
+    typeof country === "string" ? country : null
+  );
 };
 
 const parseExpiry = (value: unknown) => {
@@ -125,8 +137,10 @@ export async function GET(req: Request) {
   const where = buildWhere(searchParams);
 
   if (!hasPagingParams) {
+    const select = await getDomainSelect();
     const domains = await prisma.domain.findMany({
       where,
+      select,
       orderBy: { createdAt: "desc" },
     });
 
@@ -137,8 +151,10 @@ export async function GET(req: Request) {
   const pageSize = parsePositiveInt(searchParams.get("pageSize"), 10);
   const includeTotal = searchParams.get("includeTotal") !== "false";
   const skip = (page - 1) * pageSize;
+  const select = await getDomainSelect();
   const items = await prisma.domain.findMany({
     where,
+    select,
     orderBy:
       searchParams.get("status") === "reserved"
         ? { reservedAt: "desc" }
@@ -161,14 +177,20 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const expiry = parseExpiry(body.expiry);
+    const canPersistLanguage = await hasDomainLanguageColumn();
+    const select = await getDomainSelect();
 
     const domain = await prisma.domain.create({
+      select,
       data: {
         domain: normalizeDomain(body.domain),
         hosting: normalizeText(body.hosting),
         account: normalizeText(body.account),
         project: normalizeText(body.project),
         country: normalizeText(body.country),
+        ...(canPersistLanguage
+          ? { language: normalizeLanguage(body.language, body.country) }
+          : {}),
         ...(expiry ? { expiry } : {}),
         status: body.status === "reserved" ? "reserved" : "available",
         ...(body.status === "reserved"
@@ -210,15 +232,21 @@ export async function PUT(req: Request) {
   try {
     const body = await req.json();
     const expiry = parseExpiry(body.expiry);
+    const canPersistLanguage = await hasDomainLanguageColumn();
+    const select = await getDomainSelect();
 
     const updated = await prisma.domain.update({
       where: { id: body.id },
+      select,
       data: {
         domain: normalizeDomain(body.domain),
         hosting: normalizeText(body.hosting),
         account: normalizeText(body.account),
         project: normalizeText(body.project),
         country: normalizeText(body.country),
+        ...(canPersistLanguage
+          ? { language: normalizeLanguage(body.language, body.country) }
+          : {}),
         ...(expiry ? { expiry } : { expiry: null }),
         status: body.status,
         ...(Object.prototype.hasOwnProperty.call(body, "reservedAt")
@@ -282,6 +310,7 @@ export async function DELETE(req: Request) {
 
   await prisma.domain.delete({
     where: { id },
+    select: { id: true },
   });
 
   notifyInventoryUpdated({

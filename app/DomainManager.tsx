@@ -14,6 +14,14 @@ import { FilterBar } from "@/components/filters/FilterBar";
 
 // Utilities
 import { normalizeDomain } from "@/lib/domain/domainUtils";
+import {
+  DEFAULT_LANGUAGE_OPTIONS,
+  deriveLanguageFromCountry,
+  getLanguageOptionLabel,
+  getSuggestionCountryLabel,
+  getSuggestionLanguageLabel,
+} from "@/lib/domain/languageUtils";
+import { normalizeProjectName } from "@/lib/domain/projectUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
 import type {
   DomainFilters,
@@ -57,6 +65,14 @@ type RealtimeInventoryUpdate = {
 
 type DashboardTab = "available" | "reserved" | "backup" | "history";
 type UseMode = "pic" | "backup";
+type PendingUseRequest = {
+  id: string;
+  usedDomain: DomainItem | null;
+  project: string;
+  searchedProject: string;
+  country: string;
+  pic: string;
+};
 
 const DEFAULT_ROWS_PER_PAGE = 5;
 
@@ -129,6 +145,7 @@ export default function DomainManager() {
   const [country, setCountry] = useState("");
   const [project, setProject] = useState("");
   const [expiry, setExpiry] = useState("");
+  const [language, setLanguage] = useState("");
   const [reserveOnCreate, setReserveOnCreate] = useState(false);
 
   // suggestion
@@ -139,7 +156,8 @@ export default function DomainManager() {
   const [searchCountry, setSearchCountry] = useState("");
   const [searchPic, setSearchPic] = useState("");
   const [useMode, setUseMode] = useState<UseMode>("pic");
-  const [strictCountry, setStrictCountry] = useState(false);
+  const [pendingUseRequest, setPendingUseRequest] = useState<PendingUseRequest | null>(null);
+  const [onlyMatchingLanguage, setOnlyMatchingLanguage] = useState(false);
   const [requestError, setRequestError] = useState("");
 
   // edit state
@@ -157,6 +175,7 @@ export default function DomainManager() {
   const [accountOptions, setAccountOptions] = useState<string[]>([]);
   const [projectOptions, setProjectOptions] = useState<string[]>([]);
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
+  const [languageOptions, setLanguageOptions] = useState<string[]>(DEFAULT_LANGUAGE_OPTIONS);
   const [picOptions, setPicOptions] = useState<string[]>([]);
   const [picByCountryOptions, setPicByCountryOptions] = useState<Record<string, string[]>>({});
 
@@ -218,6 +237,7 @@ export default function DomainManager() {
   const totalReservedRef = useRef(0);
   const totalBackupRef = useRef(0);
   const totalHistoryRef = useRef(0);
+  const previousDerivedLanguageRef = useRef(deriveLanguageFromCountry(""));
   const suggestCacheRef = useRef<Map<string, DomainItem[]>>(new Map());
   const prefetchedPageCacheRef = useRef<
     Map<string, PaginatedResponse<DomainItem | DomainHistoryItem>>
@@ -271,6 +291,15 @@ export default function DomainManager() {
     return fallbackCountryMatch?.[1] ?? picOptions;
   }, [picByCountryOptions, picOptions, searchCountry]);
 
+  const languageDisplayOptions = useMemo<Option[]>(
+    () =>
+      languageOptions.map((option) => ({
+        label: getLanguageOptionLabel(option),
+        value: option,
+      })),
+    [languageOptions]
+  );
+
   const loadDomainOptions = async () => {
     setIsOptionsLoading(true);
 
@@ -283,6 +312,7 @@ export default function DomainManager() {
             account: [],
             project: [],
             country: [],
+            language: DEFAULT_LANGUAGE_OPTIONS,
             pic: [],
             picByCountry: {},
           };
@@ -291,6 +321,7 @@ export default function DomainManager() {
       setAccountOptions(data.account);
       setProjectOptions(data.project);
       setCountryOptions(data.country);
+      setLanguageOptions(data.language);
       setPicOptions(data.pic);
       setPicByCountryOptions(data.picByCountry);
     } finally {
@@ -305,6 +336,7 @@ export default function DomainManager() {
       setAccountOptions([]);
       setProjectOptions([]);
       setCountryOptions([]);
+      setLanguageOptions(DEFAULT_LANGUAGE_OPTIONS);
       setPicOptions([]);
       setPicByCountryOptions({});
       setIsOptionsLoading(false);
@@ -1147,6 +1179,20 @@ export default function DomainManager() {
   };
 
   useEffect(() => {
+    const derivedLanguage = deriveLanguageFromCountry(country.trim());
+
+    setLanguage((current) => {
+      const normalizedCurrent = current.trim().toUpperCase();
+      if (!normalizedCurrent) return derivedLanguage;
+      return normalizedCurrent === previousDerivedLanguageRef.current
+        ? derivedLanguage
+        : normalizedCurrent;
+    });
+
+    previousDerivedLanguageRef.current = derivedLanguage;
+  }, [country]);
+
+  useEffect(() => {
     const selectedDomain = matchedDomains[currentIndex];
     const countryValue = searchCountry.trim();
     const picValue = searchPic.trim();
@@ -1317,6 +1363,7 @@ export default function DomainManager() {
         account,
         project,
         country: (capitalizeText(country.trim()) || "-"),
+        language: language.trim().toUpperCase() || deriveLanguageFromCountry(country.trim()),
         status: reserveOnCreate ? "reserved" : "available",
         reservedAt: reserveOnCreate ? new Date().toISOString() : null,
         reservedForProject: reserveOnCreate ? capitalizeText(project.trim()) : undefined,
@@ -1360,11 +1407,20 @@ export default function DomainManager() {
             : prev
         );
       }
+      if (language.trim()) {
+        const normalizedLanguage = language.trim().toUpperCase();
+        setLanguageOptions((prev) =>
+          !prev.includes(normalizedLanguage)
+            ? [...prev, normalizedLanguage].sort()
+            : prev
+        );
+      }
 
       setDomain("");
       setHosting("");
       setProject("");
       setCountry("");
+      setLanguage("");
       setAccount("");
       setExpiry("");
       setReserveOnCreate(false);
@@ -1535,30 +1591,20 @@ export default function DomainManager() {
     }, 5000);
   };
 
+  const closeProjectMismatchModal = () => {
+    if (isUsingDomain) return;
+    setPendingUseRequest(null);
+  };
 
-  const handleUseDomain = async (id: string) => {
+  const executeUseDomain = async ({
+    id,
+    usedDomain,
+    project,
+    country,
+    pic,
+  }: PendingUseRequest) => {
     setIsUsingDomain(true);
     try {
-      const usedDomain = matchedDomains.find((item) => item.id === id) ?? null;
-      const projectValue = searchProject.trim();
-      const requestCountry = capitalizeText(searchCountry.trim());
-      const requestPic = useMode === "pic" ? capitalizeText(searchPic.trim()) : "";
-
-      if (!projectValue) {
-        setRequestError("Project name is required.");
-        return;
-      }
-
-      if (!requestCountry) {
-        setRequestError("Country is required before you can use a domain.");
-        return;
-      }
-
-      if (useMode === "pic" && !requestPic) {
-        setRequestError("PIC is required before you can use a domain.");
-        return;
-      }
-
       const res = await fetch("/api/domains/use", {
         method: "POST",
         headers: {
@@ -1566,9 +1612,9 @@ export default function DomainManager() {
         },
         body: JSON.stringify({
           id,
-          project: projectValue,
-          country: requestCountry,
-          pic: requestPic || undefined,
+          project,
+          country,
+          pic: pic || undefined,
           useMode,
         }),
       });
@@ -1587,25 +1633,26 @@ export default function DomainManager() {
       if (usedDomain) {
         removeDomainFromAvailableCaches(usedDomain);
       }
-      setSearchCountry(requestCountry);
-      if (requestPic) {
-        setSearchPic(requestPic);
+      setSearchCountry(country);
+      if (pic) {
+        setSearchPic(pic);
         setPicOptions((prev) =>
-          !prev.includes(requestPic) ? [...prev, requestPic].sort() : prev
+          !prev.includes(pic) ? [...prev, pic].sort() : prev
         );
         setPicByCountryOptions((prev) => {
-          const currentForCountry = prev[requestCountry] ?? [];
-          if (currentForCountry.includes(requestPic)) return prev;
+          const currentForCountry = prev[country] ?? [];
+          if (currentForCountry.includes(pic)) return prev;
 
           return {
             ...prev,
-            [requestCountry]: [...currentForCountry, requestPic].sort(),
+            [country]: [...currentForCountry, pic].sort(),
           };
         });
       }
       setMatchedDomains([]);
       setCurrentIndex(0);
       setProviderWarning("");
+      setPendingUseRequest(null);
       setTotalAvailable((prev) => Math.max(prev - 1, 0));
       setTotalHistory((prev) => prev + 1);
       queueRefresh({
@@ -1617,6 +1664,54 @@ export default function DomainManager() {
     } finally {
       setIsUsingDomain(false);
     }
+  };
+
+  const handleUseDomain = async (id: string) => {
+    const usedDomain = matchedDomains.find((item) => item.id === id) ?? null;
+    const projectValue = searchProject.trim();
+    const requestCountry = capitalizeText(searchCountry.trim());
+    const requestPic = useMode === "pic" ? capitalizeText(searchPic.trim()) : "";
+
+    if (!projectValue) {
+      setRequestError("Project name is required.");
+      return;
+    }
+
+    if (!requestCountry) {
+      setRequestError("Country is required before you can use a domain.");
+      return;
+    }
+
+    if (useMode === "pic" && !requestPic) {
+      setRequestError("PIC is required before you can use a domain.");
+      return;
+    }
+
+    setRequestError("");
+
+    const pendingRequest: PendingUseRequest = {
+      id,
+      usedDomain,
+      project: usedDomain?.project ?? projectValue,
+      searchedProject: projectValue,
+      country: requestCountry,
+      pic: requestPic,
+    };
+
+    const recordedProject = normalizeProjectName(usedDomain?.project ?? "");
+    const searchedProject = normalizeProjectName(projectValue);
+
+    if (
+      usedDomain &&
+      recordedProject &&
+      searchedProject &&
+      recordedProject !== searchedProject
+    ) {
+      setPendingUseRequest(pendingRequest);
+      return;
+    }
+
+    await executeUseDomain(pendingRequest);
   };
 
   const handleUseReservedAsBackup = async (item: DomainItem) => {
@@ -1818,39 +1913,59 @@ export default function DomainManager() {
 
       setRequestError("");
 
-      const cacheKey = `${projectKey}|${countryKey}|${strictCountry ? "1" : "0"}`;
+      const cacheKey = `${projectKey}|${countryKey}|${onlyMatchingLanguage ? "1" : "0"}`;
       let matches = suggestCacheRef.current.get(cacheKey);
+      let noLanguageMapping = false;
+      let responseCountry = searchCountry.trim().toUpperCase();
 
       if (!matches) {
         const params = new URLSearchParams({
           project: searchProject.trim(),
           country: searchCountry.trim(),
-          strictCountry: String(strictCountry),
+          onlyMatchingLanguage: String(onlyMatchingLanguage),
         });
         const res = await fetch(`/api/domains/suggest?${params.toString()}`);
         const payload = res.ok
-          ? await res.json() as { matches?: DomainItem[] } | DomainItem[]
+          ? await res.json() as {
+              matches?: DomainItem[];
+              noLanguageMapping?: boolean;
+              country?: string;
+            } | DomainItem[]
           : [];
         matches = Array.isArray(payload) ? payload : payload.matches ?? [];
+        noLanguageMapping = Array.isArray(payload) ? false : payload.noLanguageMapping === true;
+        responseCountry = Array.isArray(payload) ? responseCountry : payload.country ?? responseCountry;
         suggestCacheRef.current.set(cacheKey, matches);
       } else {
         const params = new URLSearchParams({
           project: searchProject.trim(),
           country: searchCountry.trim(),
-          strictCountry: String(strictCountry),
+          onlyMatchingLanguage: String(onlyMatchingLanguage),
         });
         const res = await fetch(`/api/domains/suggest?${params.toString()}`);
         const payload = res.ok
-          ? await res.json() as { matches?: DomainItem[] } | DomainItem[]
+          ? await res.json() as {
+              matches?: DomainItem[];
+              noLanguageMapping?: boolean;
+              country?: string;
+            } | DomainItem[]
           : [];
         if (!Array.isArray(payload) && payload.matches) {
           matches = payload.matches;
           suggestCacheRef.current.set(cacheKey, matches);
         }
+        noLanguageMapping = Array.isArray(payload) ? false : payload.noLanguageMapping === true;
+        responseCountry = Array.isArray(payload) ? responseCountry : payload.country ?? responseCountry;
       }
 
       if (matches.length === 0) {
-        alert("No available domain found for this project");
+        if (noLanguageMapping) {
+          setRequestError(
+            `No language mapping found for ${responseCountry}. Please add a mapping or turn off matching-language filter.`
+          );
+        } else {
+          alert("No available domain found for this project");
+        }
         setMatchedDomains([]);
         setCurrentIndex(0);
         setProviderWarning("");
@@ -1989,7 +2104,10 @@ export default function DomainManager() {
 
   const handleEdit = (domain: DomainItem) => {
     setEditingId(domain.id);
-    setEditDomain(domain);
+    setEditDomain({
+      ...domain,
+      language: getSuggestionLanguageLabel(domain.language, domain.country),
+    });
   };
 
   const handleSave = async () => {
@@ -2020,6 +2138,15 @@ export default function DomainManager() {
 
       if (!res.ok) {
         throw new Error(data.error || "Failed to update domain.");
+      }
+
+      if (nextDomain.language?.trim()) {
+        const normalizedLanguage = nextDomain.language.trim().toUpperCase();
+        setLanguageOptions((prev) =>
+          !prev.includes(normalizedLanguage)
+            ? [...prev, normalizedLanguage].sort()
+            : prev
+        );
       }
 
       queueRefresh({
@@ -2103,13 +2230,24 @@ export default function DomainManager() {
               placeholder="Project Name"
             />
 
-            <SmartDropdown
-              value={country}
-              setValue={(value) => setCountry(capitalizeText(value))}
-              options={countryOptions}
-              setOptions={setCountryOptions}
-              placeholder="Country"
-            />
+            <div className="grid gap-3 md:col-span-2 md:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] xl:col-span-1">
+              <SmartDropdown
+                value={country}
+                setValue={(value) => setCountry(capitalizeText(value))}
+                options={countryOptions}
+                setOptions={setCountryOptions}
+                placeholder="Country"
+              />
+
+              <SmartDropdown
+                value={language}
+                setValue={(value) => setLanguage(value.trim().toUpperCase())}
+                options={languageOptions}
+                displayOptions={languageDisplayOptions}
+                setOptions={setLanguageOptions}
+                placeholder="Language"
+              />
+            </div>
           </div>
 
           <label className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-300">
@@ -2224,10 +2362,10 @@ export default function DomainManager() {
               <input
                 type="checkbox"
                 disabled={!searchCountry}
-                checked={strictCountry}
-                onChange={(e) => setStrictCountry(e.target.checked)}
+                checked={onlyMatchingLanguage}
+                onChange={(e) => setOnlyMatchingLanguage(e.target.checked)}
               />
-              Exact country match only
+              Only show matching language
             </label>
 
             <Button
@@ -2258,7 +2396,24 @@ export default function DomainManager() {
                       {matchedDomains[currentIndex].domain}
                     </p>
 
+                    <p className="text-sm font-medium tracking-wide text-zinc-400">
+                      {getSuggestionCountryLabel(matchedDomains[currentIndex].country)} ·{" "}
+                      {getSuggestionLanguageLabel(
+                        matchedDomains[currentIndex].language,
+                        matchedDomains[currentIndex].country
+                      )}
+                    </p>
+
                     <div className="space-y-2 text-sm text-zinc-300">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-full border border-violet-500/20 bg-violet-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-violet-300">
+                          Project
+                        </span>
+                        <span className="text-sm text-zinc-200">
+                          {matchedDomains[currentIndex].project || "-"}
+                        </span>
+                      </div>
+
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
                           Hosting
@@ -2330,7 +2485,7 @@ export default function DomainManager() {
 
                   <Button
                     onClick={() => handleUseDomain(matchedDomains[currentIndex].id)}
-                    disabled={isUsingDomain || (useMode === "pic" && !searchPic.trim())}
+                    disabled={isUsingDomain}
                   >
                     {isUsingDomain ? "Using..." : useMode === "backup" ? "Use as backup" : "Use"}
                   </Button>
@@ -2438,10 +2593,12 @@ export default function DomainManager() {
                 accountOptions={accountOptions}
                 projectOptions={projectOptions}
                 countryOptions={countryOptions}
+                languageOptions={languageOptions}
                 setHostingOptions={setHostingOptions}
                 setAccountOptions={setAccountOptions}
                 setProjectOptions={setProjectOptions}
                 setCountryOptions={setCountryOptions}
+                setLanguageOptions={setLanguageOptions}
                 setEditDomain={setEditDomain}
                 handleEdit={handleEdit}
                 handleSave={handleSave}
@@ -2507,6 +2664,43 @@ export default function DomainManager() {
           </div>
         </div>
       </Card>
+
+      {pendingUseRequest?.usedDomain ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
+          <div className="w-full max-w-xl rounded-2xl border border-amber-500/30 bg-zinc-900 p-6 shadow-2xl">
+            <h3 className="text-lg font-semibold text-zinc-100">
+              Confirm project mismatch
+            </h3>
+            <p className="mt-3 text-sm leading-6 text-zinc-300">
+              This domain is recorded under project{" "}
+              <span className="font-semibold text-zinc-100">
+                &quot;{pendingUseRequest.usedDomain.project}&quot;
+              </span>
+              , but you searched for{" "}
+              <span className="font-semibold text-zinc-100">
+                &quot;{pendingUseRequest.searchedProject}&quot;
+              </span>
+              . Do you still want to use this domain?
+            </p>
+
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={closeProjectMismatchModal}
+                disabled={isUsingDomain}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void executeUseDomain(pendingUseRequest)}
+                disabled={isUsingDomain}
+              >
+                {isUsingDomain ? "Using..." : "Use anyway"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {assignPicTarget ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">

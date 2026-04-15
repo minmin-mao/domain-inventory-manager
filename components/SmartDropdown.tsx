@@ -17,6 +17,7 @@ type Props = {
   value: string;
   setValue?: (value: string) => void;
   options: string[];
+  displayOptions?: Option[];
   setOptions?: React.Dispatch<React.SetStateAction<string[]>>;
   placeholder?: string;
   isClearable?: boolean;
@@ -65,11 +66,27 @@ const customStyles: StylesConfig<Option, false> = {
 
 const SmartDropdown = forwardRef<SelectInstance<Option, false>, Props>(
   (
-    { value, setValue, options, setOptions, placeholder, isClearable, isDisabled, onChange },
+    {
+      value,
+      setValue,
+      options,
+      displayOptions,
+      setOptions,
+      placeholder,
+      isClearable,
+      isDisabled,
+      onChange,
+    },
     ref
   ) => {
     const [inputValue, setInputValue] = useState("");
     const instanceId = useId();
+
+    const resolvedOptions =
+      displayOptions ?? options.map((option) => ({ label: option, value: option }));
+    const selectedOption =
+      resolvedOptions.find((option) => option.value === value) ??
+      (value ? { label: value, value } : null);
 
     const handleChange = (option: Option | null) => {
       if (!option) {
@@ -98,7 +115,7 @@ const SmartDropdown = forwardRef<SelectInstance<Option, false>, Props>(
         ref={ref}
         instanceId={instanceId}
         styles={customStyles}
-        options={options.map((option) => ({ label: option, value: option }))}
+        options={resolvedOptions}
         onChange={handleChange}
         isClearable={isClearable}
         onInputChange={handleInputChange}
@@ -111,7 +128,7 @@ const SmartDropdown = forwardRef<SelectInstance<Option, false>, Props>(
         }}
         placeholder={placeholder}
         isDisabled={isDisabled}
-        value={value ? { label: value, value } : null}
+        value={selectedOption}
       />
     );
   }

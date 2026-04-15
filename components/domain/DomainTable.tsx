@@ -20,11 +20,13 @@ type Props = {
   accountOptions: string[];
   projectOptions: string[];
   countryOptions: string[];
+  languageOptions: string[];
 
   setHostingOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setAccountOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setProjectOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setCountryOptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setLanguageOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setEditDomain: React.Dispatch<React.SetStateAction<DomainItem | null>>;
 
   handleEdit: (item: DomainItem) => void;
@@ -52,10 +54,12 @@ export default function DomainTable(props: Props) {
     accountOptions,
     projectOptions,
     countryOptions,
+    languageOptions,
     setHostingOptions,
     setAccountOptions,
     setProjectOptions,
     setCountryOptions,
+    setLanguageOptions,
     setEditDomain,
     handleEdit,
     handleSave,
@@ -83,6 +87,7 @@ export default function DomainTable(props: Props) {
               <th className="min-w-[120px] px-4 py-3 text-left">Account</th>
               <th className="min-w-[120px] px-4 py-3 text-left">Project</th>
               <th className="min-w-[110px] px-4 py-3 text-left">Country</th>
+              <th className="min-w-[110px] px-4 py-3 text-left">Language</th>
               <th className="min-w-[120px] px-4 py-3 text-left">Expiry</th>
               <th className="min-w-[140px] px-4 py-3 text-left">Days Left</th>
               <th className="min-w-[190px] px-4 py-3 text-right">Actions</th>
@@ -93,7 +98,7 @@ export default function DomainTable(props: Props) {
             {isLoading ? (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className="px-4 py-10 text-center text-sm text-zinc-400"
                 >
                   Loading domains...
@@ -102,7 +107,7 @@ export default function DomainTable(props: Props) {
             ) : domains.length === 0 ? (
               <tr>
                 <td
-                  colSpan={10}
+                  colSpan={11}
                   className="px-4 py-10 text-center text-sm text-zinc-500"
                 >
                   No available domains found.
@@ -121,10 +126,12 @@ export default function DomainTable(props: Props) {
                   accountOptions={accountOptions}
                   projectOptions={projectOptions}
                   countryOptions={countryOptions}
+                  languageOptions={languageOptions}
                   setHostingOptions={setHostingOptions}
                   setAccountOptions={setAccountOptions}
                   setProjectOptions={setProjectOptions}
                   setCountryOptions={setCountryOptions}
+                  setLanguageOptions={setLanguageOptions}
                   setEditDomain={setEditDomain}
                   handleEdit={handleEdit}
                   handleSave={handleSave}

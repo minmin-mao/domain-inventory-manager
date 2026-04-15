@@ -1,6 +1,7 @@
 "use client";
 
 import Button from "@/components/Button";
+import { getSuggestionLanguageLabel } from "@/lib/domain/languageUtils";
 import type { DomainItem } from "@/lib/domain/domainTypes";
 
 type Props = {
@@ -47,7 +48,7 @@ export default function ReservedTable({
       ) : null}
       <div className="overflow-hidden rounded-xl ring-1 ring-zinc-800">
         <div className="overflow-x-auto">
-          <table className="min-w-[1260px] w-full text-sm">
+          <table className="min-w-[1360px] w-full text-sm">
             <thead className="bg-zinc-950 text-zinc-400">
               <tr>
                 <th className="w-12 px-4 py-3 text-left">#</th>
@@ -56,6 +57,7 @@ export default function ReservedTable({
                 <th className="min-w-[120px] px-4 py-3 text-left">Account</th>
                 <th className="min-w-[120px] px-4 py-3 text-left">Project</th>
                 <th className="min-w-[110px] px-4 py-3 text-left">Country</th>
+                <th className="min-w-[110px] px-4 py-3 text-left">Language</th>
                 <th className="min-w-[140px] px-4 py-3 text-left">PIC</th>
                 <th className="min-w-[180px] px-4 py-3 text-left">Reserved At</th>
                 <th className="min-w-[320px] px-4 py-3 text-right">Actions</th>
@@ -65,13 +67,13 @@ export default function ReservedTable({
             <tbody className="divide-y divide-zinc-800">
               {isLoading ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-zinc-400">
+                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-zinc-400">
                     Loading reserved domains...
                   </td>
                 </tr>
               ) : domains.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-10 text-center text-sm text-zinc-500">
+                  <td colSpan={10} className="px-4 py-10 text-center text-sm text-zinc-500">
                     {emptyLabel}
                   </td>
                 </tr>
@@ -95,6 +97,9 @@ export default function ReservedTable({
                       <td className="px-4 py-3">{item.account}</td>
                       <td className="px-4 py-3">{item.reservedForProject || "-"}</td>
                       <td className="px-4 py-3 text-zinc-400">{item.reservedForCountry || "-"}</td>
+                      <td className="px-4 py-3 text-zinc-300">
+                        {getSuggestionLanguageLabel(item.language, item.country)}
+                      </td>
                       <td className="px-4 py-3 text-zinc-300">{item.reservedForPic || "-"}</td>
                       <td className="px-4 py-3 text-zinc-300">
                         {item.reservedAt

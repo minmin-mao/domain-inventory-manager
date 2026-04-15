@@ -6,6 +6,7 @@ export type DomainItem = {
   account: string
   project: string
   country: string
+  language?: string | null
   hostingProvider?: string | null
   expiryDate?: string | null;
   status: "taken" | "available" | "reserved"
@@ -72,6 +73,7 @@ export type DomainOptionSets = {
   account: string[];
   project: string[];
   country: string[];
+  language: string[];
   pic: string[];
   picByCountry: Record<string, string[]>;
 };

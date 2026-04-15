@@ -1,3 +1,5 @@
+import { getDomainSelect } from "@/lib/domain/domainDb";
+import { DEFAULT_LANGUAGE_OPTIONS, getEffectiveLanguage } from "@/lib/domain/languageUtils";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
@@ -11,22 +13,16 @@ function uniqueSorted(values: Array<string | null | undefined>) {
   ).sort((a, b) => a.localeCompare(b));
 }
 
+type DomainOptionItem = Awaited<ReturnType<typeof prisma.domain.findMany>>[number] & {
+  language?: string | null;
+};
+
 export async function GET() {
+  const domainSelect = await getDomainSelect();
   const [domains, history] = await Promise.all([
     prisma.domain.findMany({
-      select: {
-        hosting: true,
-        account: true,
-        project: true,
-        country: true,
-        reservedForProject: true,
-        reservedForCountry: true,
-        reservedForPic: true,
-        usedForProject: true,
-        usedForCountry: true,
-        usedForPic: true,
-      },
-    }),
+      select: domainSelect,
+    }) as Promise<DomainOptionItem[]>,
     (prisma as typeof prisma & {
       domainHistory?: {
         findMany: (args: {
@@ -91,6 +87,10 @@ export async function GET() {
       ...domains.map((item) => item.reservedForCountry),
       ...domains.map((item) => item.usedForCountry),
       ...history.map((item) => item.country),
+    ]),
+    language: uniqueSorted([
+      ...DEFAULT_LANGUAGE_OPTIONS,
+      ...domains.map((item) => getEffectiveLanguage(item.language, item.country)),
     ]),
     pic: uniqueSorted([
       ...domains.map((item) => item.reservedForPic),

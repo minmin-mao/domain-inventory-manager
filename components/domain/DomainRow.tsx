@@ -1,6 +1,7 @@
 import Button from "@/components/Button";
 import SmartDropdown from "@/components/SmartDropdown";
 import { getDaysLeft } from "@/lib/domain/domainUtils";
+import { getSuggestionLanguageLabel } from "@/lib/domain/languageUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
 import type { DomainItem } from "@/lib/domain/domainTypes";
 
@@ -15,11 +16,13 @@ type Props = {
   accountOptions: string[];
   projectOptions: string[];
   countryOptions: string[];
+  languageOptions: string[];
 
   setHostingOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setAccountOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setProjectOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setCountryOptions: React.Dispatch<React.SetStateAction<string[]>>;
+  setLanguageOptions: React.Dispatch<React.SetStateAction<string[]>>;
   setEditDomain: React.Dispatch<React.SetStateAction<DomainItem | null>>;
 
   handleEdit: (item: DomainItem) => void;
@@ -40,10 +43,12 @@ export default function DomainRow(props: Props) {
     accountOptions,
     projectOptions,
     countryOptions,
+    languageOptions,
     setHostingOptions,
     setAccountOptions,
     setProjectOptions,
     setCountryOptions,
+    setLanguageOptions,
     setEditDomain,
     handleEdit,
     handleSave,
@@ -184,6 +189,24 @@ export default function DomainRow(props: Props) {
           />
         ) : (
           item.country
+        )}
+      </td>
+
+      <td className="px-4 py-3">
+        {editingId === item.id ? (
+          <SmartDropdown
+            value={editDomain?.language || ""}
+            setValue={(v) =>
+              setEditDomain((prev) =>
+                prev ? { ...prev, language: v.trim().toUpperCase() } : prev
+              )
+            }
+            options={languageOptions}
+            setOptions={setLanguageOptions}
+            placeholder="Language"
+          />
+        ) : (
+          getSuggestionLanguageLabel(item.language, item.country)
         )}
       </td>
 
