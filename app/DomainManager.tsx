@@ -212,7 +212,10 @@ export default function DomainManager() {
   const [totalReserved, setTotalReserved] = useState(0);
   const [totalBackup, setTotalBackup] = useState(0);
   const [totalHistory, setTotalHistory] = useState(0);
-  const [historyActionId, setHistoryActionId] = useState<string | null>(null);
+  const [historyAction, setHistoryAction] = useState<{
+    id: string;
+    type: "undo" | "delete" | "assignPic";
+  } | null>(null);
   const [reservedActionId, setReservedActionId] = useState<string | null>(null);
   const [isDomainsLoading, setIsDomainsLoading] = useState(true);
   const [isReservedLoading, setIsReservedLoading] = useState(false);
@@ -1985,52 +1988,60 @@ export default function DomainManager() {
     const ok = confirm(`Undo "${item.domain}" and move it back to available domains?`);
     if (!ok) return;
 
-    setHistoryActionId(item.id);
+    setHistoryAction({ id: item.id, type: "undo" });
 
-    const res = await fetch(`/api/domain-history/${item.id}`, {
-      method: "PATCH",
-    });
+    try {
+      const res = await fetch(`/api/domain-history/${item.id}`, {
+        method: "PATCH",
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      setHistoryActionId(null);
-      alert(data.error || "Failed to undo history row.");
-      return;
+      if (!res.ok) {
+        alert(data.error || "Failed to undo history row.");
+        return;
+      }
+
+      queueRefresh({
+        refreshDomains: true,
+        refreshHistory: true,
+        includeTotal: true,
+      });
+    } catch {
+      alert("Failed to undo history row.");
+    } finally {
+      setHistoryAction(null);
     }
-
-    queueRefresh({
-      refreshDomains: true,
-      refreshHistory: true,
-      includeTotal: true,
-    });
-    setHistoryActionId(null);
   };
 
   const handleDeleteHistory = async (item: DomainHistoryItem) => {
     const ok = confirm(`Delete the history row for "${item.domain}"?`);
     if (!ok) return;
 
-    setHistoryActionId(item.id);
+    setHistoryAction({ id: item.id, type: "delete" });
 
-    const res = await fetch(`/api/domain-history/${item.id}`, {
-      method: "DELETE",
-    });
+    try {
+      const res = await fetch(`/api/domain-history/${item.id}`, {
+        method: "DELETE",
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (!res.ok) {
-      setHistoryActionId(null);
-      alert(data.error || "Failed to delete history row.");
-      return;
+      if (!res.ok) {
+        alert(data.error || "Failed to delete history row.");
+        return;
+      }
+
+      queueRefresh({
+        refreshDomains: false,
+        refreshHistory: true,
+        includeTotal: true,
+      });
+    } catch {
+      alert("Failed to delete history row.");
+    } finally {
+      setHistoryAction(null);
     }
-
-    queueRefresh({
-      refreshDomains: false,
-      refreshHistory: true,
-      includeTotal: true,
-    });
-    setHistoryActionId(null);
   };
 
   const handleAssignHistoryPic = async (item: DomainHistoryItem) => {
@@ -2039,7 +2050,7 @@ export default function DomainManager() {
   };
 
   const closeAssignPicModal = () => {
-    if (historyActionId) return;
+    if (historyAction) return;
     setAssignPicTarget(null);
     setAssignPicValue("");
   };
@@ -2053,48 +2064,52 @@ export default function DomainManager() {
       return;
     }
 
-    setHistoryActionId(assignPicTarget.id);
+    setHistoryAction({ id: assignPicTarget.id, type: "assignPic" });
 
-    const res = await fetch(`/api/domain-history/${assignPicTarget.id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ pic: normalizedPic }),
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      setHistoryActionId(null);
-      alert(data.error || "Failed to assign PIC.");
-      return;
-    }
-
-    setPicOptions((prev) =>
-      prev.includes(normalizedPic) ? prev : [...prev, normalizedPic].sort()
-    );
-    if (assignPicTarget.country) {
-      setPicByCountryOptions((prev) => {
-        const current = prev[assignPicTarget.country] ?? [];
-        if (current.includes(normalizedPic)) return prev;
-
-        return {
-          ...prev,
-          [assignPicTarget.country]: [...current, normalizedPic].sort(),
-        };
+    try {
+      const res = await fetch(`/api/domain-history/${assignPicTarget.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ pic: normalizedPic }),
       });
-    }
 
-    queueRefresh({
-      refreshDomains: false,
-      refreshHistory: true,
-      refreshOptions: true,
-      includeTotal: true,
-    });
-    setHistoryActionId(null);
-    setAssignPicTarget(null);
-    setAssignPicValue("");
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to assign PIC.");
+        return;
+      }
+
+      setPicOptions((prev) =>
+        prev.includes(normalizedPic) ? prev : [...prev, normalizedPic].sort()
+      );
+      if (assignPicTarget.country) {
+        setPicByCountryOptions((prev) => {
+          const current = prev[assignPicTarget.country] ?? [];
+          if (current.includes(normalizedPic)) return prev;
+
+          return {
+            ...prev,
+            [assignPicTarget.country]: [...current, normalizedPic].sort(),
+          };
+        });
+      }
+
+      queueRefresh({
+        refreshDomains: false,
+        refreshHistory: true,
+        refreshOptions: true,
+        includeTotal: true,
+      });
+      setAssignPicTarget(null);
+      setAssignPicValue("");
+    } catch {
+      alert("Failed to assign PIC.");
+    } finally {
+      setHistoryAction(null);
+    }
   };
 
 
@@ -2637,7 +2652,7 @@ export default function DomainManager() {
                 isLoading={isBackupLoading}
                 onPrev={() => setPageBackup((p) => Math.max(p - 1, 1))}
                 onNext={() => setPageBackup((p) => Math.min(p + 1, totalPagesBackup))}
-                historyActionId={historyActionId}
+                historyAction={historyAction}
                 onAssignPic={handleAssignHistoryPic}
                 onUndoHistory={handleUndoHistory}
                 onDeleteHistory={handleDeleteHistory}
@@ -2655,7 +2670,7 @@ export default function DomainManager() {
                 isLoading={isHistoryLoading}
                 onPrev={() => setPageHistory((p) => Math.max(p - 1, 1))}
                 onNext={() => setPageHistory((p) => Math.min(p + 1, totalPagesHistory))}
-                historyActionId={historyActionId}
+                historyAction={historyAction}
                 onAssignPic={handleAssignHistoryPic}
                 onUndoHistory={handleUndoHistory}
                 onDeleteHistory={handleDeleteHistory}
@@ -2730,15 +2745,15 @@ export default function DomainManager() {
               <Button
                 variant="secondary"
                 onClick={closeAssignPicModal}
-                disabled={Boolean(historyActionId)}
+                disabled={Boolean(historyAction)}
               >
                 Cancel
               </Button>
               <Button
                 onClick={() => void handleConfirmAssignHistoryPic()}
-                disabled={Boolean(historyActionId)}
+                disabled={Boolean(historyAction)}
               >
-                {historyActionId ? "Saving..." : "Save PIC"}
+                {historyAction ? "Saving..." : "Save PIC"}
               </Button>
             </div>
           </div>

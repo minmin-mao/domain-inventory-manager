@@ -15,7 +15,10 @@ type Props = {
   onPrev: () => void;
   onNext: () => void;
   histories: DomainHistoryItem[];
-  historyActionId: string | null;
+  historyAction: {
+    id: string;
+    type: "undo" | "delete" | "assignPic";
+  } | null;
   onAssignPic?: (item: DomainHistoryItem) => void | Promise<void>;
   onUndoHistory: (item: DomainHistoryItem) => void | Promise<void>;
   onDeleteHistory: (item: DomainHistoryItem) => void | Promise<void>;
@@ -33,7 +36,7 @@ export default function HistoryTable({
   onPrev,
   onNext,
   histories,
-  historyActionId,
+  historyAction,
   onAssignPic,
   onUndoHistory,
   onDeleteHistory,
@@ -84,7 +87,8 @@ export default function HistoryTable({
               </tr>
             ) : (
               histories.map((item, index) => {
-                const isBusy = historyActionId === item.id;
+                const actionType =
+                  historyAction?.id === item.id ? historyAction.type : null;
                 const isBackup = item.usageType === "backup";
                 const statusLabel = isBackup ? "backup" : item.status;
 
@@ -130,10 +134,10 @@ export default function HistoryTable({
                         {onAssignPic ? (
                           <Button
                             variant="secondary"
-                            disabled={isBusy || item.id.startsWith("legacy-")}
+                            disabled={Boolean(actionType) || item.id.startsWith("legacy-")}
                             onClick={() => onAssignPic(item)}
                           >
-                            {isBusy
+                            {actionType === "assignPic"
                               ? "Saving..."
                               : isBackup
                                 ? "Assign PIC"
@@ -144,18 +148,18 @@ export default function HistoryTable({
                         {item.canUndo ? (
                           <Button
                             variant="secondary"
-                            disabled={isBusy}
+                            disabled={Boolean(actionType)}
                             onClick={() => onUndoHistory(item)}
                           >
-                            {isBusy ? "Undoing..." : "Undo"}
+                            {actionType === "undo" ? "Undoing..." : "Undo"}
                           </Button>
                         ) : (
                           <Button
                             variant="secondary"
-                            disabled={isBusy || item.id.startsWith("legacy-")}
+                            disabled={Boolean(actionType) || item.id.startsWith("legacy-")}
                             onClick={() => onDeleteHistory(item)}
                           >
-                            {isBusy ? "Deleting..." : "Delete"}
+                            {actionType === "delete" ? "Deleting..." : "Delete"}
                           </Button>
                         )}
                       </div>
