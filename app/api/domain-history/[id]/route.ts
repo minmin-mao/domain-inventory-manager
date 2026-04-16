@@ -11,6 +11,7 @@ type DomainHistoryDelegate = {
   }) => Promise<{
     id: string;
     domainId: string;
+    domain: string;
     createdAt: Date;
     usedForPic?: string | null;
   } | null>;
@@ -25,6 +26,31 @@ function getHistoryDelegate() {
   return (prisma as typeof prisma & {
     domainHistory?: DomainHistoryDelegate;
   }).domainHistory;
+}
+
+async function resolveLinkedDomainId(
+  domainId: string | null | undefined,
+  domainName: string | null | undefined
+) {
+  if (domainId) {
+    const byId = await prisma.domain.findUnique({
+      where: { id: domainId },
+      select: { id: true },
+    });
+
+    if (byId) return byId.id;
+  }
+
+  if (domainName) {
+    const byDomain = await prisma.domain.findUnique({
+      where: { domain: domainName },
+      select: { id: true },
+    });
+
+    if (byDomain) return byDomain.id;
+  }
+
+  return null;
 }
 
 export async function PATCH(
@@ -58,13 +84,25 @@ export async function PATCH(
       return NextResponse.json({ error: "History row not found" }, { status: 404 });
     }
 
+    const linkedDomainId = await resolveLinkedDomainId(
+      historyRow.domainId,
+      historyRow.domain
+    );
+
+    if (!linkedDomainId) {
+      return NextResponse.json(
+        { error: "Linked domain record not found for this history row." },
+        { status: 404 }
+      );
+    }
+
     await prisma.$transaction(async (tx) => {
       const txHistoryDelegate = (tx as typeof tx & {
         domainHistory?: DomainHistoryDelegate;
       }).domainHistory;
 
       await tx.domain.update({
-        where: { id: historyRow.domainId },
+        where: { id: linkedDomainId },
         data: {
           usedForPic: requestedPic,
         },
@@ -100,10 +138,15 @@ export async function PATCH(
         where: { id },
       });
 
-  const effectiveDomainId = historyRow?.domainId || domainId;
+  const effectiveDomainId = isLegacyRow
+    ? domainId
+    : await resolveLinkedDomainId(historyRow?.domainId, historyRow?.domain);
 
   if (!effectiveDomainId) {
-    return NextResponse.json({ error: "History row not found" }, { status: 404 });
+    return NextResponse.json(
+      { error: "Linked domain record not found for this history row." },
+      { status: 404 }
+    );
   }
 
   const cutoffTime = isLegacyRow
@@ -173,6 +216,11 @@ export async function DELETE(
     return NextResponse.json({ error: "History row not found" }, { status: 404 });
   }
 
+  const linkedDomainId = await resolveLinkedDomainId(
+    historyRow.domainId,
+    historyRow.domain
+  );
+
   await prisma.$transaction(async (tx) => {
     const txHistoryDelegate = (tx as typeof tx & {
       domainHistory?: DomainHistoryDelegate;
@@ -182,9 +230,11 @@ export async function DELETE(
       where: { id },
     });
 
-    await tx.domain.delete({
-      where: { id: historyRow.domainId },
-    });
+    if (linkedDomainId) {
+      await tx.domain.delete({
+        where: { id: linkedDomainId },
+      });
+    }
   });
 
   notifyInventoryUpdated({
