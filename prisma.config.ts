@@ -8,6 +8,9 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
 
   datasource: {
-    url: process.env.LOCAL_DATABASE_URL || process.env.DATABASE_URL!,
+    url:
+      process.env.PRISMA_DATABASE_URL ||
+      process.env.LOCAL_DATABASE_URL ||
+      process.env.DATABASE_URL!,
   },
 })
