@@ -1,4 +1,3 @@
-import { getDomainSelect } from "@/lib/domain/domainDb";
 import {
   deriveLanguageFromCountry,
   getEffectiveLanguage,
@@ -7,9 +6,24 @@ import {
   normalizeCountryCode,
   normalizeLanguageCode,
 } from "@/lib/domain/languageUtils";
+import { hasDomainLanguageColumn } from "@/lib/domain/domainDb";
 import { isNormalizedProjectMatch } from "@/lib/domain/projectUtils";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
+
+const SUGGEST_CACHE_TTL_MS = 60 * 1000;
+const SUGGEST_CACHE_MAX_ENTRIES = 100;
+const suggestResponseCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    payload: {
+      matches: Omit<ScoredSuggestedMatch, "score">[];
+      noLanguageMapping: boolean;
+      country: string;
+    };
+  }
+>();
 
 type SuggestedMatch = {
   id: string;
@@ -19,17 +33,7 @@ type SuggestedMatch = {
   project: string;
   country: string;
   language?: string | null;
-  expiry: Date | null;
-  reservedAt: Date | null;
-  reservedForProject: string | null;
-  reservedForCountry: string | null;
-  reservedForPic: string | null;
-  usedAt: Date | null;
-  usedForProject: string | null;
-  usedForCountry: string | null;
-  usedForPic: string | null;
   createdAt: Date;
-  updatedAt: Date;
   status: "available" | "reserved" | "taken";
 };
 
@@ -38,6 +42,7 @@ type ScoredSuggestedMatch = SuggestedMatch & {
 };
 
 export async function GET(req: Request) {
+  try {
   const { searchParams } = new URL(req.url);
   const project = searchParams.get("project")?.trim() ?? "";
   const country = searchParams.get("country")?.trim() ?? "";
@@ -59,13 +64,29 @@ export async function GET(req: Request) {
 
   const requestCountry = normalizeCountryCode(country);
   const mappedLanguage = getMappedLanguageFromCountry(country);
-  const select = await getDomainSelect();
+  const cacheKey = `${project.toLowerCase()}|${requestCountry}|${onlyMatchingLanguage ? "1" : "0"}`;
+  const cached = suggestResponseCache.get(cacheKey);
 
+  if (cached && cached.expiresAt > Date.now()) {
+    return NextResponse.json(cached.payload);
+  }
+
+  const canSelectLanguage = await hasDomainLanguageColumn();
   const availableMatches = await prisma.domain.findMany({
     where: {
       status: "available",
     },
-    select,
+    select: {
+      id: true,
+      domain: true,
+      hosting: true,
+      account: true,
+      project: true,
+      country: true,
+      ...(canSelectLanguage ? { language: true } : {}),
+      createdAt: true,
+      status: true,
+    },
     orderBy: { createdAt: "asc" },
   }) as SuggestedMatch[];
 
@@ -182,10 +203,41 @@ export async function GET(req: Request) {
       return match;
     });
 
-  return NextResponse.json({
+  const payload = {
     matches,
     noLanguageMapping:
       !mappedLanguage && onlyMatchingLanguage && !hasExactCountryMatches,
     country: requestCountry,
+  };
+
+  suggestResponseCache.set(cacheKey, {
+    expiresAt: Date.now() + SUGGEST_CACHE_TTL_MS,
+    payload,
   });
+  if (suggestResponseCache.size > SUGGEST_CACHE_MAX_ENTRIES) {
+    const now = Date.now();
+    for (const [key, value] of suggestResponseCache) {
+      if (value.expiresAt <= now) {
+        suggestResponseCache.delete(key);
+      }
+    }
+
+    while (suggestResponseCache.size > SUGGEST_CACHE_MAX_ENTRIES) {
+      const oldestKey = suggestResponseCache.keys().next().value;
+      if (!oldestKey) break;
+      suggestResponseCache.delete(oldestKey);
+    }
+  }
+
+  return NextResponse.json(payload);
+  } catch (error) {
+    console.error(
+      "Failed to suggest domains",
+      error instanceof Error ? error.message : error
+    );
+    return NextResponse.json(
+      { matches: [], error: "Failed to suggest domains." },
+      { status: 500 }
+    );
+  }
 }

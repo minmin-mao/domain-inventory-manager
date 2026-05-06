@@ -23,6 +23,7 @@ import {
 } from "@/lib/domain/languageUtils";
 import { normalizeProjectName } from "@/lib/domain/projectUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
+import { pusherClient } from "@/lib/pusher-client";
 import type {
   DomainFilters,
   DomainOptionSets,
@@ -108,6 +109,7 @@ function buildInventoryQuery(
 // ================================
 
 export default function DomainManager() {
+  const shouldUsePusher = pusherClient !== null;
   const normalizeExpiryInput = (value: string) => {
     const trimmed = value.trim();
     const localDateMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -1038,62 +1040,82 @@ export default function DomainManager() {
   refreshInventoryDataRef.current = refreshInventoryData;
 
   useEffect(() => {
-    const source = new EventSource("/api/realtime/domains");
+    const flushRefresh = (payload?: Partial<RealtimeInventoryUpdate>) => {
+      realtimePendingRef.current = {
+        refreshDomains:
+          realtimePendingRef.current.refreshDomains || payload?.refreshDomains !== false,
+        refreshHistory:
+          realtimePendingRef.current.refreshHistory || payload?.refreshHistory !== false,
+        refreshOptions:
+          realtimePendingRef.current.refreshOptions || payload?.refreshOptions === true,
+        includeTotal:
+          realtimePendingRef.current.includeTotal || payload?.includeTotal !== false,
+        silent: true,
+      };
 
-    source.onmessage = (message) => {
-      try {
-        const payload = JSON.parse(message.data) as RealtimeInventoryUpdate | { type: "connected" | "heartbeat" };
-        if (payload.type !== "inventory.updated") return;
+      if (realtimeFlushTimerRef.current !== null) return;
 
+      realtimeFlushTimerRef.current = window.setTimeout(() => {
+        const pending = realtimePendingRef.current;
         realtimePendingRef.current = {
-          refreshDomains:
-            realtimePendingRef.current.refreshDomains || payload.refreshDomains,
-          refreshHistory:
-            realtimePendingRef.current.refreshHistory || payload.refreshHistory,
-          refreshOptions:
-            realtimePendingRef.current.refreshOptions || payload.refreshOptions,
-          includeTotal:
-            realtimePendingRef.current.includeTotal || payload.includeTotal,
-          silent: true,
+          refreshDomains: false,
+          refreshHistory: false,
+          refreshOptions: false,
+          includeTotal: false,
+          silent: false,
         };
+        realtimeFlushTimerRef.current = null;
 
-        if (realtimeFlushTimerRef.current !== null) return;
+        void refreshInventoryDataRef.current({
+          ...pending,
+          silent: true,
+        }).catch((error) => {
+          console.error("Failed to process Pusher update", error);
+        });
+      }, 400);
+    };
 
-        realtimeFlushTimerRef.current = window.setTimeout(() => {
-          const pending = realtimePendingRef.current;
-          realtimePendingRef.current = {
-            refreshDomains: false,
-            refreshHistory: false,
-            refreshOptions: false,
-            includeTotal: false,
-            silent: false,
-          };
+    const client = pusherClient;
+    if (shouldUsePusher && client) {
+      const channel = client.subscribe("domains");
+      channel.bind("domains:updated", flushRefresh);
+
+      return () => {
+        if (realtimeFlushTimerRef.current !== null) {
+          clearTimeout(realtimeFlushTimerRef.current);
           realtimeFlushTimerRef.current = null;
+        }
+        channel.unbind("domains:updated", flushRefresh);
+        client.unsubscribe("domains");
+      };
+    }
 
-          void refreshInventoryDataRef.current({
-            ...pending,
-            silent: true,
-          }).catch((error) => {
-            console.error("Failed to process realtime update", error);
-          });
-        }, 150);
-      } catch (error) {
-        console.error("Invalid realtime payload", error);
-      }
+    const refreshSilently = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshInventoryDataRef.current({
+        refreshDomains: true,
+        refreshHistory: true,
+        refreshOptions: false,
+        includeTotal: false,
+        silent: true,
+      }).catch((error) => {
+        console.error("Fallback refresh failed", error);
+      });
     };
 
-    source.onerror = (error) => {
-      console.warn("Realtime connection issue", error);
-    };
+    const pollTimer = window.setInterval(refreshSilently, 60 * 1000);
+    const handleVisibilityChange = () => refreshSilently();
+    const handleFocus = () => refreshSilently();
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
 
     return () => {
-      if (realtimeFlushTimerRef.current !== null) {
-        clearTimeout(realtimeFlushTimerRef.current);
-        realtimeFlushTimerRef.current = null;
-      }
-      source.close();
+      window.clearInterval(pollTimer);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
     };
-  }, []);
+  }, [shouldUsePusher]);
 
 
   // ================================
@@ -1206,35 +1228,38 @@ export default function DomainManager() {
     }
 
     let cancelled = false;
-    const params = new URLSearchParams({
-      country: countryValue,
-      pic: picValue,
-    });
-
-    void fetch(`/api/domains/last-provider?${params.toString()}`)
-      .then(async (res) =>
-        res.ok
-          ? await res.json() as { lastProvider: string | null }
-          : { lastProvider: null }
-      )
-      .then((payload) => {
-        if (cancelled) return;
-        setProviderWarning(
-          getProviderWarningText(
-            payload.lastProvider,
-            selectedDomain.hosting,
-            picValue
-          )
-        );
-      })
-      .catch((error) => {
-        console.error("Failed to load last provider", error);
-        if (cancelled) return;
-        setProviderWarning("");
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        country: countryValue,
+        pic: picValue,
       });
+
+      void fetch(`/api/domains/last-provider?${params.toString()}`)
+        .then(async (res) =>
+          res.ok
+            ? await res.json() as { lastProvider: string | null }
+            : { lastProvider: null }
+        )
+        .then((payload) => {
+          if (cancelled) return;
+          setProviderWarning(
+            getProviderWarningText(
+              payload.lastProvider,
+              selectedDomain.hosting,
+              picValue
+            )
+          );
+        })
+        .catch((error) => {
+          console.error("Failed to load last provider", error);
+          if (cancelled) return;
+          setProviderWarning("");
+        });
+    }, 400);
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
   }, [currentIndex, matchedDomains, searchCountry, searchPic, useMode]);
 
@@ -1917,11 +1942,12 @@ export default function DomainManager() {
       setRequestError("");
 
       const cacheKey = `${projectKey}|${countryKey}|${onlyMatchingLanguage ? "1" : "0"}`;
-      let matches = suggestCacheRef.current.get(cacheKey);
+      const cachedMatches = suggestCacheRef.current.get(cacheKey);
+      let matches: DomainItem[] = cachedMatches ?? [];
       let noLanguageMapping = false;
       let responseCountry = searchCountry.trim().toUpperCase();
 
-      if (!matches) {
+      if (!cachedMatches) {
         const params = new URLSearchParams({
           project: searchProject.trim(),
           country: searchCountry.trim(),
@@ -1939,26 +1965,6 @@ export default function DomainManager() {
         noLanguageMapping = Array.isArray(payload) ? false : payload.noLanguageMapping === true;
         responseCountry = Array.isArray(payload) ? responseCountry : payload.country ?? responseCountry;
         suggestCacheRef.current.set(cacheKey, matches);
-      } else {
-        const params = new URLSearchParams({
-          project: searchProject.trim(),
-          country: searchCountry.trim(),
-          onlyMatchingLanguage: String(onlyMatchingLanguage),
-        });
-        const res = await fetch(`/api/domains/suggest?${params.toString()}`);
-        const payload = res.ok
-          ? await res.json() as {
-              matches?: DomainItem[];
-              noLanguageMapping?: boolean;
-              country?: string;
-            } | DomainItem[]
-          : [];
-        if (!Array.isArray(payload) && payload.matches) {
-          matches = payload.matches;
-          suggestCacheRef.current.set(cacheKey, matches);
-        }
-        noLanguageMapping = Array.isArray(payload) ? false : payload.noLanguageMapping === true;
-        responseCountry = Array.isArray(payload) ? responseCountry : payload.country ?? responseCountry;
       }
 
       if (matches.length === 0) {

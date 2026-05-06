@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint",
     "db:local:status": "node scripts/run-with-db-env.mjs local npx prisma migrate status",
@@ -24,6 +25,8 @@
     "next": "^16.0.10",
     "pg": "^8.20.0",
     "prisma": "^7.4.2",
+    "pusher": "^5.3.3",
+    "pusher-js": "^8.5.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-select": "^5.10.2",

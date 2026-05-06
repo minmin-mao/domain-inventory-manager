@@ -122,54 +122,65 @@ const buildWhere = (searchParams: URLSearchParams): Prisma.DomainWhereInput => {
 
 // GET all domains
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const hasPagingParams =
-    searchParams.has("page") ||
-    searchParams.has("pageSize") ||
-    searchParams.has("search") ||
-    searchParams.has("hostingProvider") ||
-    searchParams.has("project") ||
-    searchParams.has("country") ||
-    searchParams.has("pic") ||
-    searchParams.has("expiry") ||
-    searchParams.has("status") ||
-    searchParams.has("exactDomain");
-  const where = buildWhere(searchParams);
+  try {
+    const { searchParams } = new URL(req.url);
+    const hasPagingParams =
+      searchParams.has("page") ||
+      searchParams.has("pageSize") ||
+      searchParams.has("search") ||
+      searchParams.has("hostingProvider") ||
+      searchParams.has("project") ||
+      searchParams.has("country") ||
+      searchParams.has("pic") ||
+      searchParams.has("expiry") ||
+      searchParams.has("status") ||
+      searchParams.has("exactDomain");
+    const where = buildWhere(searchParams);
 
-  if (!hasPagingParams) {
+    if (!hasPagingParams) {
+      const select = await getDomainSelect();
+      const domains = await prisma.domain.findMany({
+        where,
+        select,
+        orderBy: { createdAt: "desc" },
+      });
+
+      return NextResponse.json(domains);
+    }
+
+    const page = parsePositiveInt(searchParams.get("page"), 1);
+    const pageSize = parsePositiveInt(searchParams.get("pageSize"), 10);
+    const includeTotal = searchParams.get("includeTotal") !== "false";
+    const skip = (page - 1) * pageSize;
     const select = await getDomainSelect();
-    const domains = await prisma.domain.findMany({
+    const items = await prisma.domain.findMany({
       where,
       select,
-      orderBy: { createdAt: "desc" },
+      orderBy:
+        searchParams.get("status") === "reserved"
+          ? { reservedAt: "desc" }
+          : { createdAt: "desc" },
+      skip,
+      take: pageSize,
     });
+    const total = includeTotal ? await prisma.domain.count({ where }) : undefined;
 
-    return NextResponse.json(domains);
+    return NextResponse.json({
+      items,
+      total,
+      page,
+      pageSize,
+    });
+  } catch (error) {
+    console.error(
+      "Failed to load domains",
+      error instanceof Error ? error.message : error
+    );
+    return NextResponse.json(
+      { error: "Failed to load domains." },
+      { status: 500 }
+    );
   }
-
-  const page = parsePositiveInt(searchParams.get("page"), 1);
-  const pageSize = parsePositiveInt(searchParams.get("pageSize"), 10);
-  const includeTotal = searchParams.get("includeTotal") !== "false";
-  const skip = (page - 1) * pageSize;
-  const select = await getDomainSelect();
-  const items = await prisma.domain.findMany({
-    where,
-    select,
-    orderBy:
-      searchParams.get("status") === "reserved"
-        ? { reservedAt: "desc" }
-        : { createdAt: "desc" },
-    skip,
-    take: pageSize,
-  });
-  const total = includeTotal ? await prisma.domain.count({ where }) : undefined;
-
-  return NextResponse.json({
-    items,
-    total,
-    page,
-    pageSize,
-  });
 }
 
 // CREATE new domain
@@ -301,25 +312,36 @@ export async function PUT(req: Request) {
 
 // DELETE domain
 export async function DELETE(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const id = searchParams.get("id");
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get("id");
 
-  if (!id) {
-    return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    if (!id) {
+      return NextResponse.json({ error: "Missing id" }, { status: 400 });
+    }
+
+    await prisma.domain.delete({
+      where: { id },
+      select: { id: true },
+    });
+
+    notifyInventoryUpdated({
+      source: "domains",
+      refreshDomains: true,
+      refreshHistory: false,
+      refreshOptions: true,
+      includeTotal: true,
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error(
+      "Failed to delete domain",
+      error instanceof Error ? error.message : error
+    );
+    return NextResponse.json(
+      { error: "Failed to delete domain." },
+      { status: 500 }
+    );
   }
-
-  await prisma.domain.delete({
-    where: { id },
-    select: { id: true },
-  });
-
-  notifyInventoryUpdated({
-    source: "domains",
-    refreshDomains: true,
-    refreshHistory: false,
-    refreshOptions: true,
-    includeTotal: true,
-  });
-
-  return NextResponse.json({ success: true });
 }

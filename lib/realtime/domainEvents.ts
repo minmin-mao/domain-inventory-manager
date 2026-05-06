@@ -1,3 +1,5 @@
+import { pusher } from "@/lib/pusher";
+
 type InventoryRealtimeEvent = {
   type: "inventory.updated";
   refreshDomains: boolean;
@@ -8,41 +10,27 @@ type InventoryRealtimeEvent = {
   at: string;
 };
 
-type Listener = (event: InventoryRealtimeEvent) => void;
-
-const globalForRealtime = globalThis as unknown as {
-  inventoryListeners?: Set<Listener>;
-};
-
-const listeners =
-  globalForRealtime.inventoryListeners ?? new Set<Listener>();
-
-if (!globalForRealtime.inventoryListeners) {
-  globalForRealtime.inventoryListeners = listeners;
-}
-
-export function subscribeInventoryEvents(listener: Listener) {
-  listeners.add(listener);
-
-  return () => {
-    listeners.delete(listener);
-  };
-}
-
 export function notifyInventoryUpdated(
   partial: Omit<InventoryRealtimeEvent, "type" | "at">
 ) {
+  const timestamp = Date.now();
   const event: InventoryRealtimeEvent = {
     type: "inventory.updated",
-    at: new Date().toISOString(),
+    at: new Date(timestamp).toISOString(),
     ...partial,
   };
 
-  listeners.forEach((listener) => {
-    try {
-      listener(event);
-    } catch (error) {
-      console.error("Realtime listener failed", error);
-    }
-  });
+  if (!pusher) return;
+
+  void pusher
+    .trigger("domains", "domains:updated", {
+      timestamp,
+      ...event,
+    })
+    .catch((error) => {
+      console.error(
+        "Pusher domains:updated trigger failed",
+        error instanceof Error ? error.message : error
+      );
+    });
 }
