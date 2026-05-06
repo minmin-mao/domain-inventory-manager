@@ -132,7 +132,7 @@ export async function POST(req: Request) {
       return { history, updatedDomain };
     });
 
-    notifyInventoryUpdated({
+    await notifyInventoryUpdated({
       source: "use",
       refreshDomains: true,
       refreshHistory: true,

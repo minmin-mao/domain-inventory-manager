@@ -45,7 +45,7 @@ export async function POST(req: Request) {
       },
     });
 
-    notifyInventoryUpdated({
+    await notifyInventoryUpdated({
       source: "domains",
       refreshDomains: true,
       refreshHistory: false,

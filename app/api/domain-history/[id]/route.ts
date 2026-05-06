@@ -114,7 +114,7 @@ export async function PATCH(
       });
     });
 
-    notifyInventoryUpdated({
+    await notifyInventoryUpdated({
       source: "history",
       refreshDomains: false,
       refreshHistory: true,
@@ -183,7 +183,7 @@ export async function PATCH(
     }
   });
 
-  notifyInventoryUpdated({
+  await notifyInventoryUpdated({
     source: "history",
     refreshDomains: true,
     refreshHistory: true,
@@ -237,7 +237,7 @@ export async function DELETE(
     }
   });
 
-  notifyInventoryUpdated({
+  await notifyInventoryUpdated({
     source: "history",
     refreshDomains: true,
     refreshHistory: true,

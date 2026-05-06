@@ -215,7 +215,7 @@ export async function POST(req: Request) {
       },
     });
 
-    notifyInventoryUpdated({
+    await notifyInventoryUpdated({
       source: "domains",
       refreshDomains: true,
       refreshHistory: false,
@@ -287,7 +287,7 @@ export async function PUT(req: Request) {
       },
     });
 
-    notifyInventoryUpdated({
+    await notifyInventoryUpdated({
       source: "domains",
       refreshDomains: true,
       refreshHistory: false,
@@ -325,7 +325,7 @@ export async function DELETE(req: Request) {
       select: { id: true },
     });
 
-    notifyInventoryUpdated({
+    await notifyInventoryUpdated({
       source: "domains",
       refreshDomains: true,
       refreshHistory: false,

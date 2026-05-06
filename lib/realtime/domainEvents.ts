@@ -10,7 +10,7 @@ type InventoryRealtimeEvent = {
   at: string;
 };
 
-export function notifyInventoryUpdated(
+export async function notifyInventoryUpdated(
   partial: Omit<InventoryRealtimeEvent, "type" | "at">
 ) {
   const timestamp = Date.now();
@@ -22,15 +22,15 @@ export function notifyInventoryUpdated(
 
   if (!pusher) return;
 
-  void pusher
-    .trigger("domains", "domains:updated", {
+  try {
+    await pusher.trigger("domains", "domains:updated", {
       timestamp,
       ...event,
-    })
-    .catch((error) => {
-      console.error(
-        "Pusher domains:updated trigger failed",
-        error instanceof Error ? error.message : error
-      );
     });
+  } catch (error) {
+    console.error(
+      "Pusher domains:updated trigger failed",
+      error instanceof Error ? error.message : error
+    );
+  }
 }
