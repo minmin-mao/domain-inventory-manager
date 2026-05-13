@@ -7,7 +7,10 @@ import {
   normalizeLanguageCode,
 } from "@/lib/domain/languageUtils";
 import { hasDomainLanguageColumn } from "@/lib/domain/domainDb";
-import { isNormalizedProjectMatch } from "@/lib/domain/projectUtils";
+import {
+  getProjectMatchKind,
+  type ProjectMatchKind,
+} from "@/lib/domain/projectUtils";
 import { prisma } from "@/lib/prisma";
 import { NextResponse } from "next/server";
 
@@ -18,7 +21,7 @@ const suggestResponseCache = new Map<
   {
     expiresAt: number;
     payload: {
-      matches: Omit<ScoredSuggestedMatch, "score">[];
+      matches: SuggestedMatch[];
       noLanguageMapping: boolean;
       country: string;
     };
@@ -37,8 +40,19 @@ type SuggestedMatch = {
   status: "available" | "reserved" | "taken";
 };
 
-type ScoredSuggestedMatch = SuggestedMatch & {
+type ProjectSuggestedMatch = SuggestedMatch & {
+  projectMatchKind: Exclude<ProjectMatchKind, "none">;
+  projectScore: number;
+};
+
+type ScoredSuggestedMatch = ProjectSuggestedMatch & {
   score: number;
+};
+
+const PROJECT_MATCH_SCORE: Record<Exclude<ProjectMatchKind, "none">, number> = {
+  exact: 300,
+  normalized: 250,
+  prefix: 0,
 };
 
 export async function GET(req: Request) {
@@ -90,9 +104,30 @@ export async function GET(req: Request) {
     orderBy: { createdAt: "asc" },
   }) as SuggestedMatch[];
 
-  const projectMatches = availableMatches.filter((item) =>
-    isNormalizedProjectMatch(item.project, project)
+  const projectCandidates = availableMatches
+    .map((item) => {
+      const projectMatchKind = getProjectMatchKind(item.project, project);
+      if (projectMatchKind === "none") return null;
+
+      return {
+        ...item,
+        projectMatchKind,
+        projectScore: PROJECT_MATCH_SCORE[projectMatchKind],
+      };
+    })
+    .filter((item): item is ProjectSuggestedMatch => item !== null);
+  const hasStrongProjectMatches = projectCandidates.some(
+    (item) =>
+      item.projectMatchKind === "exact" ||
+      item.projectMatchKind === "normalized"
   );
+
+  // Exact/normalized project matches are authoritative. Prefix matches such
+  // as "Flexi HM" for a "Flexi" search are only fallback candidates when no
+  // stronger project match exists.
+  const projectMatches = hasStrongProjectMatches
+    ? projectCandidates.filter((item) => item.projectMatchKind !== "prefix")
+    : projectCandidates;
 
   const exactCountryAnyLanguage = projectMatches.filter((item) => {
     const itemCountry = normalizeCountryCode(item.country);
@@ -156,8 +191,9 @@ export async function GET(req: Request) {
 
   const scoredMatches = new Map<string, ScoredSuggestedMatch>();
 
-  const assignBucketScore = (items: SuggestedMatch[], score: number) => {
+  const assignBucketScore = (items: ProjectSuggestedMatch[], countryScore: number) => {
     items.forEach((item) => {
+      const score = item.projectScore + countryScore;
       const existing = scoredMatches.get(item.id);
       if (!existing || score > existing.score) {
         scoredMatches.set(item.id, {
@@ -198,8 +234,10 @@ export async function GET(req: Request) {
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     })
     .map((item) => {
-      const { score, ...match } = item;
+      const { score, projectScore, projectMatchKind, ...match } = item;
       void score;
+      void projectScore;
+      void projectMatchKind;
       return match;
     });
 
