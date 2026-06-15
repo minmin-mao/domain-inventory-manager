@@ -1,6 +1,8 @@
 "use client";
 
 import Button from "@/components/Button";
+import ExternalLinkText from "@/components/ExternalLinkText";
+import { getAccountReferenceUrl, getHostingLoginUrl } from "@/lib/domain/domainLinks";
 import type { DomainHistoryItem } from "@/lib/domain/domainTypes";
 
 type Props = {
@@ -115,8 +117,18 @@ export default function HistoryTable({
                         {statusLabel}
                       </span>
                     </td>
-                    <td className="px-4 py-3">{item.hosting}</td>
-                    <td className="px-4 py-3">{item.account}</td>
+                    <td className="px-4 py-3">
+                      <ExternalLinkText href={getHostingLoginUrl(item.hosting)}>
+                        {item.hosting}
+                      </ExternalLinkText>
+                    </td>
+                    <td className="px-4 py-3">
+                      <ExternalLinkText
+                        href={getAccountReferenceUrl(item.hosting, item.account)}
+                      >
+                        {item.account}
+                      </ExternalLinkText>
+                    </td>
                     <td className="px-4 py-3">{item.project}</td>
                     <td className="px-4 py-3 text-zinc-400">{item.country || "-"}</td>
                     <td className="px-4 py-3 text-zinc-300">{item.usedForPic || "-"}</td>

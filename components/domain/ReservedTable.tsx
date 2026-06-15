@@ -1,6 +1,8 @@
 "use client";
 
 import Button from "@/components/Button";
+import ExternalLinkText from "@/components/ExternalLinkText";
+import { getAccountReferenceUrl, getHostingLoginUrl } from "@/lib/domain/domainLinks";
 import { getSuggestionLanguageLabel } from "@/lib/domain/languageUtils";
 import type { DomainItem } from "@/lib/domain/domainTypes";
 
@@ -93,8 +95,18 @@ export default function ReservedTable({
                     >
                       <td className="px-4 py-3">{index + 1}</td>
                       <td className="px-4 py-3 font-medium">{item.domain}</td>
-                      <td className="px-4 py-3">{item.hosting}</td>
-                      <td className="px-4 py-3">{item.account}</td>
+                      <td className="px-4 py-3">
+                        <ExternalLinkText href={getHostingLoginUrl(item.hosting)}>
+                          {item.hosting}
+                        </ExternalLinkText>
+                      </td>
+                      <td className="px-4 py-3">
+                        <ExternalLinkText
+                          href={getAccountReferenceUrl(item.hosting, item.account)}
+                        >
+                          {item.account}
+                        </ExternalLinkText>
+                      </td>
                       <td className="px-4 py-3">{item.reservedForProject || "-"}</td>
                       <td className="px-4 py-3 text-zinc-400">{item.reservedForCountry || "-"}</td>
                       <td className="px-4 py-3 text-zinc-300">

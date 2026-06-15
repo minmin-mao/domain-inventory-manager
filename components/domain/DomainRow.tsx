@@ -1,5 +1,7 @@
 import Button from "@/components/Button";
+import ExternalLinkText from "@/components/ExternalLinkText";
 import SmartDropdown from "@/components/SmartDropdown";
+import { getAccountReferenceUrl, getHostingLoginUrl } from "@/lib/domain/domainLinks";
 import { getDaysLeft } from "@/lib/domain/domainUtils";
 import { getSuggestionLanguageLabel } from "@/lib/domain/languageUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
@@ -131,7 +133,9 @@ export default function DomainRow(props: Props) {
             placeholder="Hosting"
           />
         ) : (
-          item.hosting
+          <ExternalLinkText href={getHostingLoginUrl(item.hosting)}>
+            {item.hosting}
+          </ExternalLinkText>
         )}
       </td>
 
@@ -150,7 +154,11 @@ export default function DomainRow(props: Props) {
             placeholder="Account"
           />
         ) : (
-          item.account
+          <ExternalLinkText
+            href={getAccountReferenceUrl(item.hosting, item.account)}
+          >
+            {item.account}
+          </ExternalLinkText>
         )}
       </td>
 

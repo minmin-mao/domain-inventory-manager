@@ -8,11 +8,13 @@ import Input from "@/components/Input";
 import Button from "@/components/Button";
 import SmartDropdown from "@/components/SmartDropdown";
 import DomainTable from "@/components/domain/DomainTable";
+import ExternalLinkText from "@/components/ExternalLinkText";
 import HistoryTable from "@/components/domain/HistoryTable";
 import ReservedTable from "@/components/domain/ReservedTable";
 import { FilterBar } from "@/components/filters/FilterBar";
 
 // Utilities
+import { getAccountReferenceUrl, getHostingLoginUrl } from "@/lib/domain/domainLinks";
 import { normalizeDomain } from "@/lib/domain/domainUtils";
 import {
   DEFAULT_LANGUAGE_OPTIONS,
@@ -23,7 +25,7 @@ import {
 } from "@/lib/domain/languageUtils";
 import { normalizeProjectName } from "@/lib/domain/projectUtils";
 import { capitalizeText } from "@/lib/domain/textUtils";
-import { pusherClient } from "@/lib/pusher-client";
+import { getPusherClient, isPusherConfigured } from "@/lib/pusher-client";
 import type {
   DomainFilters,
   DomainOptionSets,
@@ -109,7 +111,7 @@ function buildInventoryQuery(
 // ================================
 
 export default function DomainManager() {
-  const shouldUsePusher = pusherClient !== null;
+  const shouldUsePusher = isPusherConfigured;
   const normalizeExpiryInput = (value: string) => {
     const trimmed = value.trim();
     const localDateMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
@@ -1075,8 +1077,8 @@ export default function DomainManager() {
       }, 400);
     };
 
-    const client = pusherClient;
-    if (shouldUsePusher && client) {
+    const client = shouldUsePusher ? getPusherClient() : null;
+    if (client) {
       const channel = client.subscribe("domains");
       channel.bind("domains:updated", flushRefresh);
 
@@ -2439,18 +2441,27 @@ export default function DomainManager() {
                         <span className="rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-emerald-300">
                           Hosting
                         </span>
-                        <span className="text-sm text-zinc-200">
+                        <ExternalLinkText
+                          href={getHostingLoginUrl(matchedDomains[currentIndex].hosting)}
+                          className="text-sm text-zinc-200"
+                        >
                           {matchedDomains[currentIndex].hosting || "-"}
-                        </span>
+                        </ExternalLinkText>
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="rounded-full border border-sky-500/20 bg-sky-500/10 px-2.5 py-1 text-xs font-medium uppercase tracking-wide text-sky-300">
                           Account
                         </span>
-                        <span className="text-sm text-zinc-200">
+                        <ExternalLinkText
+                          href={getAccountReferenceUrl(
+                            matchedDomains[currentIndex].hosting,
+                            matchedDomains[currentIndex].account
+                          )}
+                          className="text-sm text-zinc-200"
+                        >
                           {matchedDomains[currentIndex].account || "-"}
-                        </span>
+                        </ExternalLinkText>
                       </div>
                     </div>
                   </div>
