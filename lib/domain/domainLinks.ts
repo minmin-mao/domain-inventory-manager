@@ -11,6 +11,7 @@ const HOSTING_LOGIN_URLS: Record<string, string> = {
   ultahost: "https://bill.ultahost.com/login",
   virtualine: "https://client.virtualine.net/login",
   orange: "https://secure.orangewebsite.com/login",
+  hostcay: "https://my.hostcay.com/client/login",
 };
 
 const ACCOUNT_REFERENCE_RANGES: Record<string, string> = {
